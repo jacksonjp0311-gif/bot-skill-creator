@@ -1,0 +1,12 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Warehouse API · Example", "version": "1.0.0", "description": "Fictional contract for offline demonstrations. No live service."},
+  "servers": [{"url": "https://warehouse.example.com/v1"}],
+  "security": [{"WarehouseAuth": []}],
+  "paths": {
+    "/inventory": {"get": {"operationId": "listInventory", "summary": "List stock levels and reorder thresholds", "parameters": [{"in": "query", "name": "warehouse_id", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "Inventory snapshot"}}}},
+    "/suppliers": {"get": {"operationId": "listSuppliers", "summary": "Read supplier names and lead times", "responses": {"200": {"description": "Supplier directory"}}}},
+    "/purchase-orders": {"post": {"operationId": "createPurchaseOrder", "summary": "Create a purchase order — changes external state", "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"supplier_id": {"type": "string"}, "sku": {"type": "string"}, "quantity": {"type": "integer", "minimum": 1}}, "required": ["supplier_id", "sku", "quantity"]}}}}, "responses": {"201": {"description": "Order created"}}}}
+  },
+  "components": {"securitySchemes": {"WarehouseAuth": {"type": "http", "scheme": "bearer"}}}
+}

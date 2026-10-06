@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "browser": "Chromium",
+  "mode": "mounted assets + Python HTTP bridge",
+  "checked": [
+    "API import",
+    "operation selection",
+    "offline chat",
+    "blueprint edit",
+    "reviewed ZIP download",
+    "library reopen surface",
+    "math calculator",
+    "provider configure/disconnect",
+    "mobile layout",
+    "no JS page errors"
+  ],
+  "not_checked": [
+    "paid live model providers",
+    "business API execution",
+    "direct browser networking",
+    "native macOS/Windows"
+  ]
+}

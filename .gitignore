@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+exports/
+my-workspace/
+*.sqlite3
+*.sqlite3-*
+*.tmp
+.DS_Store
+Thumbs.db
+.coverage
+.pytest_cache/
+docs/assets/smoke-export.zip

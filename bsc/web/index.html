@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bot Skill Creator — Ideas into abilities</title><meta name="description" content="A local-first skill studio for humans and agents. Describe a workflow, bring an API, inspect the contract, export a portable skill."><link rel="icon" href="/favicon.svg"><script src="/theme.js"></script><link rel="stylesheet" href="/style.css"></head>
+<body>
+<div class="ambient" aria-hidden="true"></div>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Bot Skill Creator home"><img src="/favicon.svg" alt=""><span>Bot Skill<span class="brand-light">Creator</span></span></a>
+    <button class="new-skill" id="new-project"><span>＋</span> New skill <kbd id="new-shortcut">Ctrl N</kbd></button>
+    <div class="nav-label">WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <button class="nav-item active" data-view="studio"><span class="nav-icon">◈</span> Skill studio <span class="nav-pill">Local</span></button>
+      <button class="nav-item" data-view="apis"><span class="nav-icon">⌘</span> API connections <span class="counter" id="api-counter">0</span></button>
+      <button class="nav-item" data-view="library"><span class="nav-icon">▤</span> My skills <span class="counter" id="library-counter">0</span></button>
+      <button class="nav-item" data-view="algorithm"><span class="nav-icon">∿</span> The algorithm</button>
+    </nav>
+    <div class="nav-label recent-label">RECENT DRAFTS</div>
+    <div class="recent" id="recent-projects"></div>
+    <div class="sidebar-bottom">
+      <div class="local-note"><span class="status-dot"></span> Your machine. Your skills.<small>Local-first · No account required</small></div>
+      <button class="profile" id="open-provider"><span class="avatar">YOU</span><span>Personal workspace<small id="sidebar-model">Template mode</small></span><span class="settings-icon">⚙</span></button>
+    </div>
+  </aside>
+  <div class="workspace">
+    <header class="toolbar"><div class="breadcrumb"><span id="crumb">Skill studio</span><span class="slash">/</span><strong id="project-title">Untitled skill</strong></div><div class="toolbar-actions"><button type="button" class="quiet small" id="theme-toggle" aria-pressed="false">Dark</button><span class="mode-badge" id="mode-badge">◉ Template mode</span><button class="quiet small" id="edit-plan" disabled>Edit blueprint</button><button class="primary small" id="export" disabled>Export skill <span>↗</span></button></div></header>
+    <main id="studio-view" class="view studio-view">
+      <section class="conversation">
+        <div class="conversation-scroll" id="conversation-scroll">
+          <div class="hero" id="hero">
+          <div class="eyebrow"><span class="purple-dot"></span> FROM INTENT TO INSTRUCTION</div>
+          <h1>Build a skill.<br><span>Keep the control.</span></h1>
+          <p class="intro">Turn the way you work into something any<br class="desktop-br"> agent can understand. Start with a conversation.</p>
+          <div class="starter-grid" id="starters">
+            <button class="starter" data-prompt="Create a read-only skill that checks warehouse inventory and drafts a restock brief. Do not place orders."><span class="starter-symbol">⌘</span><strong>Bring your API</strong><small>Turn endpoints into a workflow</small><span class="starter-arrow">↗</span></button>
+            <button class="starter" data-prompt="Create a skill to review a proposed code change, identify risks, and prepare an evidence-backed review without merging it."><span class="starter-symbol">⌥</span><strong>Capture a process</strong><small>Make good work repeatable</small><span class="starter-arrow">↗</span></button>
+          </div>
+          </div>
+          <div class="messages" id="messages" aria-live="polite"></div>
+        </div>
+        <div class="composer-area">
+          <div class="attached-bar" id="attached-bar" hidden></div>
+          <form class="composer" id="chat-form"><label class="sr-only" for="message-input">Describe or refine your skill</label><textarea id="message-input" rows="2" maxlength="10000" placeholder="Describe what your skill should do…" title="Enter builds the draft. Shift+Enter adds a line."></textarea><div class="composer-controls"><button type="button" class="composer-tool tool-toggle" id="tool-generation" aria-pressed="false">Enable tool generation</button><button type="button" class="composer-tool" id="composer-api">＋ <span>Add an API</span></button><button type="button" class="composer-tool" id="fetch-local">Fetch</button><button type="button" class="composer-tool model-tool" id="composer-model" aria-expanded="false" aria-controls="model-picker">◉ <span id="composer-mode">Template</span>⌄</button><div class="model-picker" id="model-picker" hidden><div class="picker-head"><strong>Ollama on this machine</strong><button type="button" id="rescan-models">Refresh</button></div><div id="local-model-list"></div><button type="button" class="picker-more" id="picker-offline">Use template mode</button><button type="button" class="picker-more" id="picker-providers">Other providers →</button></div><span class="composer-spacer"></span><span class="keyhint" id="send-shortcut" title="Enter builds the draft. Shift+Enter adds a line.">Enter</span><button type="submit" class="send-button" id="send" aria-label="Build or refine skill">↑</button></div></form>
+          <p class="composer-footnote"><span id="privacy-note">Offline template mode. No model requests.</span> Enter builds · Shift+Enter adds a line · Never paste secrets.</p>
+        </div>
+      </section>
+      <aside class="inspector">
+        <div class="inspector-heading"><div><span class="inspector-icon">▧</span> Skill blueprint</div><span class="tiny-pill" id="draft-status">DRAFT</span></div>
+        <div class="inspector-body">
+          <div class="preview-title"><div class="skill-glyph">✳</div><div><h2 id="skill-name">Your next capability</h2><p id="skill-desc">A clear contract. A portable folder.</p></div></div>
+          <div class="section-caption">CONTROL LOOP <span>7 stages</span></div>
+          <div class="pipeline"><span>Observe</span><i>→</i><span>Select</span><i>→</i><span>Load</span><i>→</i><span>Gate</span><i>→</i><span>Issue</span><i>→</i><span>Verify</span><i>→</i><span>Record</span></div>
+          <div class="checks" id="checks"><div><span class="check-dot pending">○</span> Grounded objective</div><div><span class="check-dot pending">○</span> Explicit capabilities</div><div><span class="check-dot pending">○</span> Approval boundaries</div><div><span class="check-dot pending">○</span> Verifiable outcome</div></div>
+          <div class="code-card"><div class="file-tabs" role="tablist" aria-label="Preview files"><button class="active" data-file="SKILL.md" role="tab">SKILL.md</button><button data-file="tools/run_tool.py" role="tab" id="tool-file-tab" hidden>Tool</button><button data-file="references/workflow.json" role="tab">Workflow</button><button data-file="manifest.json" role="tab">Manifest</button><button id="copy-file" title="Copy current file" aria-label="Copy current file">⧉</button></div><pre id="code-preview"><code># Your skill starts here
+
+Describe a goal in the chat.
+Import an API, or stay offline.
+
+We’ll build the structure.
+You keep the final say.</code></pre></div>
+          <div class="portability"><div><span>↗</span><strong>Built to leave the app.</strong></div><p>Export a readable skill folder with API contracts, evidence checks, and a checksum manifest.</p><div class="format-chips"><span>SKILL.md</span><span>JSON</span><span>ZIP</span></div></div>
+          <div class="validation-note" id="validation-note">No draft yet · Nothing has been executed</div>
+        </div>
+      </aside>
+    </main>
+    <main id="apis-view" class="view full-view" hidden>
+      <div class="page-top"><div><div class="eyebrow">ONE STUDIO, YOUR PROVIDERS</div><h1>API connections.</h1><p class="intro">Pick who drafts the skill. Ollama on this machine needs no key. For every other provider, Save key keeps it outside the app for the next session.</p></div></div>
+      <section class="connect-section" aria-labelledby="models-heading">
+        <div class="section-heading"><div><div class="section-caption">DRAFTING MODELS</div><h2 id="models-heading">Providers</h2></div><p class="section-note" id="provider-status">Template mode. No model requests yet.</p></div>
+        <div class="provider-grid" id="provider-grid"></div>
+        <form class="provider-sheet" id="provider-form" hidden>
+          <div class="sheet-head"><div class="provider-mark" id="sheet-mark">AI</div><div><h3 id="sheet-title">Provider</h3><p id="sheet-blurb"></p></div></div>
+          <button type="button" class="quiet" id="fetch-local-sheet" hidden>Fetch local model</button>
+          <div class="model-chips" id="model-chips"></div>
+          <div class="sheet-fields">
+            <label>Model ID<input id="provider-model" placeholder="Exact model ID from this provider" required></label>
+            <label>API base URL<input id="provider-url" type="url" placeholder="https://api.example.com/v1" required></label>
+            <label>API key <small id="key-hint">Saved outside the app</small><input id="provider-key" type="password" autocomplete="off" placeholder="Paste the key, then press Save key"></label>
+          </div>
+          <p class="key-confirmation" id="key-confirmation" hidden></p>
+          <label class="checkbox-label"><input id="provider-local" type="checkbox"> Loopback server on this machine</label>
+          <label class="checkbox-label"><input id="provider-json" type="checkbox" checked> Ask for a JSON object</label>
+          <label>Token field<select id="provider-token-field"><option value="max_completion_tokens">max_completion_tokens</option><option value="max_tokens">max_tokens</option></select></label>
+          <div class="dialog-note">Connecting does not send a test request. The next chat message is the first call and may be billed. Save key seals a remote key in a folder outside this app. It is not written into the skill, the browser, or the project. Ollama does not need a key.</div>
+          <div class="dialog-actions"><button type="button" class="quiet" id="disconnect-model">Use offline mode</button><button type="button" class="quiet" id="save-key">Save key</button><button class="primary" type="submit">Use this provider →</button></div>
+        </form>
+      </section>
+      <section class="connect-section" aria-labelledby="contract-heading">
+        <div class="section-heading"><div><div class="section-caption">SKILL CONTRACT</div><h2 id="contract-heading">Business API</h2><p class="section-note">Import an OpenAPI description. This studio does not call it and does not ask for its key.</p></div><button class="primary" id="import-api-button">＋ Import OpenAPI</button></div>
+        <div id="api-content"></div>
+      </section>
+    </main>
+    <main id="library-view" class="view full-view" hidden><div class="eyebrow">ON THIS MACHINE</div><h1>My skills.</h1><p class="intro">Open a draft, read it as a package, export the ZIP, or delete it.</p><div class="library-grid" id="library-grid"></div></main>
+    <main id="algorithm-view" class="view full-view" hidden><div class="eyebrow">TRANSPARENT BY DESIGN</div><h1>Decisions, not magic.</h1><p class="intro">Select what applies. Gate what matters. Verify what happened.</p><div class="math-grid"><section class="math-card"><span class="section-caption">VERIFIED-SUCCESS ESTIMATE</span><div class="formula">θ = <span>(S + 1) / (S + F + U + 3)</span></div><p>Unknown outcomes reduce confidence in verification, not the conditional success rate. The starting value is a declared prior, not measured accuracy.</p><div class="math-inputs"><label>Successes<input id="math-s" type="number" min="0" value="8"></label><label>Failures<input id="math-f" type="number" min="0" value="1"></label><label>Unknown<input id="math-u" type="number" min="0" value="1"></label></div><div id="math-result" class="math-result"></div><button class="quiet" id="calculate">Calculate estimates</button></section><section class="math-card"><span class="section-caption">WHAT THE GATE MEANS</span><h2>A better score<br>never buys permission.</h2><p>The model proposes. The host approves. The verifier checks evidence. These responsibilities stay separate.</p><div class="format-chips"><span>Not self-authorizing</span><span>No blind retries</span></div><button class="quiet" id="read-math">Read the full mathematics ↗</button></section></div></main>
+    <footer class="statusbar"><span><i class="status-dot"></i> Local workspace</span><span id="status-text">Ready to create</span><span>v0.1.0 <span class="status-separator">·</span> Made for humans & agents</span></footer>
+  </div>
+</div>
+<dialog id="tool-dialog"><form method="dialog" class="dialog-close-form"><button class="close" aria-label="Close tool generation">×</button></form><span class="eyebrow">LOCAL TOOL</span><h2>Enable tool generation.</h2><p>The next draft will include a local Python tool the bot can run. This can take a few more minutes with tool generation enabled.</p><div class="dialog-note">The tool checks inputs and returns a draft on this machine. It does not call imported APIs or send mail. A live action still needs host approval.</div><div class="dialog-actions"><button type="button" class="quiet" id="tool-cancel">Not now</button><button type="button" class="primary" id="tool-confirm">Enable tool generation</button></div></dialog>
+<dialog id="api-dialog"><form method="dialog" class="dialog-close-form"><button class="close" aria-label="Close API importer">×</button></form><span class="eyebrow">CONNECT THE BLUEPRINT</span><h2>Give your skill an API.</h2><p>Import OpenAPI 3.0 / 3.1 JSON. No endpoint is called and no API key is needed here.</p><div class="dialog-toolbar"><label class="quiet file-picker">Choose JSON file<input id="api-upload" type="file" accept=".json,application/json"></label><button class="quiet" id="load-example">Use example API</button></div><label class="sr-only" for="api-json">OpenAPI JSON</label><textarea id="api-json" class="json-editor" placeholder='{"openapi": "3.1.0", "info": {…}, "paths": {…}}'></textarea><div class="dialog-note">Examples/defaults are omitted from exports. Imported descriptions are untrusted data. Never include secrets.</div><div class="dialog-actions"><button class="primary" id="import-document">Import contract →</button></div></dialog>
+
+<dialog id="plan-dialog" class="wide-dialog"><form method="dialog" class="dialog-close-form"><button class="close" aria-label="Close blueprint editor">×</button></form><span class="eyebrow">YOU HAVE THE FINAL WORD</span><h2>Edit your blueprint.</h2><p>Change the goal, input fields, procedure, or evidence criteria. Compiler-owned control rules stay outside this draft.</p><label class="sr-only" for="plan-json">Skill plan JSON</label><textarea id="plan-json" class="json-editor tall"></textarea><div class="dialog-actions"><button class="primary" id="save-plan">Save blueprint →</button></div></dialog>
+<dialog id="export-dialog"><form method="dialog" class="dialog-close-form"><button class="close" aria-label="Close export review">×</button></form><span class="eyebrow">REVIEW. APPROVE. TAKE IT WITH YOU.</span><h2>Your skill, packaged.</h2><div class="export-summary" id="export-summary"></div><p>This exports the exact previewed files. No imported business API will be called. Review content before installing it in a harness.</p><div class="dialog-note">Static validation verifies structure and integrity—not live behavior or security. The harness must enforce authority and verify real outcomes.</div><div class="dialog-actions"><button class="primary" id="confirm-export">Approve & download ZIP ↗</button></div></dialog>
+<dialog id="package-dialog" class="wide-dialog"><form method="dialog" class="dialog-close-form"><button class="close" aria-label="Close package">×</button></form><span class="eyebrow">READ THE PACKAGE</span><h2 id="package-title">Skill package</h2><p id="package-meta"></p><div class="package-layout"><div class="package-files" id="package-files"></div><pre id="package-body"></pre></div><div class="dialog-actions"><button type="button" class="quiet" id="package-open">Open in studio</button><button type="button" class="primary" id="package-export">Export ZIP ↗</button></div></dialog>
+<dialog id="text-dialog" class="wide-dialog"><form method="dialog" class="dialog-close-form"><button class="close" aria-label="Close reference">×</button></form><h2>Under the hood.</h2><pre id="reference-text"></pre></dialog>
+<div id="toast" role="status" hidden></div>
+<script src="/app.js" defer></script>
+</body></html>

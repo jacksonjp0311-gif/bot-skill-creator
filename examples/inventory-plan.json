@@ -1,0 +1,9 @@
+{
+  "name": "inventory-brief",
+  "description": "Read warehouse inventory and prepare a prioritized restock brief. Use when the user asks which SKUs need attention; never place orders.",
+  "goal": "Produce a restock brief identifying SKUs below their provided reorder threshold, with quantities, source timestamps, and missing-data notes.",
+  "inputs": ["warehouse_id", "Inventory records and their observation time", "Reorder thresholds and target stock supplied by the user or API"],
+  "steps": ["Confirm the warehouse and the intended reporting window.", "Ask the host to call listInventory for the approved warehouse_id.", "Compare each observed stock quantity with its supplied reorder threshold. Never invent a threshold.", "Draft a table of SKU, stock on hand, threshold, shortfall, and source timestamp.", "Check the arithmetic against the returned records and report missing or stale data."],
+  "success_criteria": ["Each reported SKU appears in the source response for the approved warehouse.", "Shortfall calculations reproduce from the provided quantities and thresholds.", "The brief contains no claim that a purchase order was placed."],
+  "constraints": ["Read and report only; do not create, send, or approve purchase orders.", "Do not expose supplier tokens or credentials in output.", "Mark unavailable inventory as unknown rather than zero."]
+}

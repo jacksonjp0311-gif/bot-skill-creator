@@ -1,0 +1,28 @@
+name: Offline tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test controller, compiler, HTTP and provider fixtures
+        env:
+          PYTHONUTF8: '1'
+        run: python -m unittest discover -s tests -v
+      - name: Build and inspect example
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          python -m bsc create --plan examples/inventory-plan.json --openapi examples/warehouse.openapi.json --operations listInventory --out exports
+          python -m bsc validate exports/inventory-brief
+          python exports/inventory-brief/scripts/validate.py
