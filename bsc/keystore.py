@@ -136,22 +136,31 @@ def is_ollama_url(value):
     return parsed.hostname in {'127.0.0.1', 'localhost', '::1'} and parsed.port == 11434
 
 
+_DPAPI_MAGIC = b'DPAPI1'
+_SEAL_MAGIC = b'SEAL01'
+
+
 def _seal(payload, key):
     if os.name == 'nt':
-        return b'DPAPI1' + _dpapi(payload, protect=True)
+        return _DPAPI_MAGIC + _dpapi(payload, protect=True)
+    return _portable_seal(payload, key)
+
+
+def _portable_seal(payload, key):
     nonce = os.urandom(16)
     stream = _keystream(key, nonce, len(payload))
     body = bytes(left ^ right for left, right in zip(payload, stream))
     mac = hmac.new(key, nonce + body, hashlib.sha256).digest()
-    return b'SEAL1' + nonce + mac + body
+    return _SEAL_MAGIC + nonce + mac + body
 
 
 def _open_seal(blob, key):
-    if blob.startswith(b'DPAPI1'):
-        return _dpapi(blob[6:], protect=False)
-    if not blob.startswith(b'SEAL1') or len(blob) < 6 + 16 + 32:
+    if blob.startswith(_DPAPI_MAGIC):
+        return _dpapi(blob[len(_DPAPI_MAGIC):], protect=False)
+    if not blob.startswith(_SEAL_MAGIC) or len(blob) < len(_SEAL_MAGIC) + 16 + 32:
         raise ValueError('unrecognized key file')
-    nonce, mac, body = blob[6:22], blob[22:54], blob[54:]
+    start = len(_SEAL_MAGIC)
+    nonce, mac, body = blob[start:start + 16], blob[start + 16:start + 48], blob[start + 48:]
     if not hmac.compare_digest(mac, hmac.new(key, nonce + body, hashlib.sha256).digest()):
         raise ValueError('key file failed its check')
     stream = _keystream(key, nonce, len(body))

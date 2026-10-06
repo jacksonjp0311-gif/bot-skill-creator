@@ -327,6 +327,14 @@ class WorkspaceTests(unittest.TestCase):
         status=self.ws.secret_status()
         self.assertEqual(status['saved_keys'], ['openai'])
         self.assertNotIn(secret, json.dumps(status))
+    def test_portable_seal_roundtrip_uses_its_own_header(self):
+        from bsc.keystore import _open_seal, _portable_seal
+        secret=b'{"v":1,"provider":"openai","api_key":"portable-test-key"}'
+        blob=_portable_seal(secret, b'k'*32)
+        self.assertTrue(blob.startswith(b'SEAL01'))
+        self.assertEqual(len(b'SEAL01'), 6)
+        self.assertNotIn(b'portable-test-key', blob)
+        self.assertEqual(_open_seal(blob, b'k'*32), secret)
     def test_ollama_choice_is_remembered_without_a_key(self):
         info=self.ws.configure_provider({'provider_id':'local','base_url':'http://127.0.0.1:11434/v1','model':'llama3.2:latest','api_key':'','local':True,'json_mode':False,'token_field':'max_tokens'})
         self.assertEqual(info['confirmation'], 'Saved for the next session. No API key is used.')

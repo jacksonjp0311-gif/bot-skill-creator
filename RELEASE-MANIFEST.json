@@ -10,7 +10,7 @@
     ".github/workflows/tests.yml": "9a00af891ac79f40be6455a88f104bd4bf79f7da664f659d888370d566562703",
     ".gitignore": "96b4b4c495ea5433b67f92e91d60b6bc972045ef20b4e3d65b36c3e36c65ebb9",
     "AGENTS.md": "e43cc1d05cd9b2e1601e0870b254fed325e4bdd9fbfe40711d31fca6fa8eacf0",
-    "CHANGELOG.md": "fbccd73842945b0410d8030e617f2a70c6a60c8e49d1f347f2c8d57e8123c502",
+    "CHANGELOG.md": "1b394e4f792bcc18a6500bc22312145a1f5c7f2174e3be06f1754df29d9650c8",
     "CONTRIBUTING.md": "3026bed26ea4993fb0360db84e291acb61bd7b8a51cad178e5180e1fecf9daac",
     "LICENSE": "fc5871619dbada8d41db760d9507c758cd1c0ba0030bc7b2c14b47c9bc3469d1",
     "README.md": "93a4edd86f1e9843dff592e56d5c4b8eb5d0b5930761a74114bd0e4927569dfe",
@@ -24,7 +24,7 @@
     "bsc/control.py": "8007cc5f347b6888dbda4bc52867e442429b05bb72b19d7dbbce35c437440df3",
     "bsc/core.py": "653bf506705415b9ae8f31c2486990a5de5256a942baac4079dfbbb5286acf0c",
     "bsc/discover.py": "398ae2957f5e0b0b3d7460cefb470d68182a58cc7befd43bb5861bffddd3cd09",
-    "bsc/keystore.py": "958f606adbd2a9cdb8426fd8c7c6062f516d1f4862400dc2917aa62b342a13df",
+    "bsc/keystore.py": "b4b7552ffe7cb2af112b5a65e94b37ee4648151742bfbea9f4f73200a3ad6a76",
     "bsc/openapi.py": "2282a69426a1218095c096498d3a8e8bb28084c995077d4f88c59193e10022eb",
     "bsc/providers.py": "930dc44b3521eb89d070db8feeea1033e9303eec9566b7743a842809d7a9d440",
     "bsc/security.py": "4b08b669117bdb26a419a5665f270e0e44d9ba92f3fffcec073bed3aba8d1636",
@@ -65,7 +65,7 @@
     "templates/skill-template.md": "68da13b191825ad12bd61c16d9de9cf038cbd5f6e10e67d6d69556822b9d0557",
     "tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "tests/test_control.py": "dd2801a9761dd68d0ca802335ec202a13620dbec8cbda4c0b14f0dfe306bca3d",
-    "tests/test_creator.py": "2be2510986ebf4213ce92d4cc131069fb9b3e1d13213302bd75176bd104d2a87",
+    "tests/test_creator.py": "9560ac88c3b2dabcede24f47d6baf27010b436f8b3389022de4a51fa8726a9d0",
     "tests/test_http.py": "d818e878aaf5c5c4509c42d614a90b1c549860d409614ff1e4384dff8671e929"
   }
 }

@@ -23,5 +23,6 @@ Initial local release of Bot Skill Creator.
 - Enable tool generation adds a local Python tool to the skill. Turning it on explains that the next draft can take a few more minutes. The tool checks inputs on this machine and does not call imported APIs.
 - While a draft is running, the chat shows an orbit, a wave, and a traveling light beside the working line.
 - The README opens with light-mode and dark-mode pictures of an empty studio. No personal drafts or keys are part of the repository.
+- Saved keys can be opened again on macOS and Linux. The portable seal header is read at its real length.
 
 Known release boundaries are documented in README.md and SECURITY.md.
