@@ -61,7 +61,13 @@ def pixel(px, py, scale):
     )
     for distance, ink in shapes:
         color = composite(color, ink, cover(distance * scale))
-    return tuple(max(0, min(255, round(channel))) for channel in color)
+    red, green, blue, alpha = color
+    return (
+        max(0, min(255, round(red))),
+        max(0, min(255, round(green))),
+        max(0, min(255, round(blue))),
+        max(0, min(255, round(alpha * 255))),
+    )
 
 
 def raster(size):
@@ -91,13 +97,36 @@ def png(size, rgba):
     return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', header) + chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b'')
 
 
+def dib(size, rgba):
+    """32-bit BMP icon image. Explorer draws this. A PNG payload labeled as 32-bit is left blank."""
+    xor_stride = size * 4
+    and_stride = ((size + 31) // 32) * 4
+    xor = bytearray()
+    mask = bytearray()
+    for y in range(size - 1, -1, -1):
+        row = bytearray(xor_stride)
+        bits = bytearray(and_stride)
+        for x in range(size):
+            red, green, blue, alpha = rgba[(y * size + x) * 4:(y * size + x) * 4 + 4]
+            start = x * 4
+            row[start:start + 4] = bytes((blue, green, red, alpha))
+            if alpha < 128:
+                bits[x // 8] |= 0x80 >> (x % 8)
+        xor += row
+        mask += bits
+    image = bytes(xor) + bytes(mask)
+    header = struct.pack('<IiiHHIIiiII', 40, size, size * 2, 1, 32, 0, len(image), 0, 0, 0, 0)
+    return header + image
+
+
 def ico(images):
     header = struct.pack('<HHH', 0, 1, len(images))
     offset = 6 + 16 * len(images)
     entries = b''
     body = b''
     for size, blob in images:
-        entries += struct.pack('<BBBBHHII', size if size < 256 else 0, size if size < 256 else 0, 0, 0, 1, 32, len(blob), offset)
+        stored = size if size < 256 else 0
+        entries += struct.pack('<BBBBHHII', stored, stored, 0, 0, 1, 32, len(blob), offset)
         offset += len(blob)
         body += blob
     return header + entries + body
@@ -107,11 +136,14 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     images = []
     for size in (16, 32, 48, 256):
-        blob = png(size, raster(size))
-        images.append((size, blob))
+        pixels = raster(size)
+        images.append((size, dib(size, pixels)))
         if size == 256:
-            (OUT / 'bot-skill-creator.png').write_bytes(blob)
-    (OUT / 'bot-skill-creator.ico').write_bytes(ico(images))
+            (OUT / 'bot-skill-creator.png').write_bytes(png(size, pixels))
+    blob = ico(images)
+    if blob[6 + 16 * len(images):6 + 16 * len(images) + 8].startswith(b'\x89PNG'):
+        raise SystemExit('The icon is still a PNG. Explorer will draw it blank.')
+    (OUT / 'bot-skill-creator.ico').write_bytes(blob)
 
 
 if __name__ == '__main__':

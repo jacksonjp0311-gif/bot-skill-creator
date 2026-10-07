@@ -27,5 +27,6 @@ Initial local release of Bot Skill Creator.
 - Running the studio opens the local page and keeps the server only while that page is open. `bsc serve` does this by itself. The launcher does not leave a console waiting.
 - An accepted harness is included when a skill is drafted. The request does not have to name the skills or tools that are already in that harness.
 - `install.ps1` and `install.sh` put the studio logo on the desktop. Clicking it opens the local studio and leaves it up while that page is open.
+- The desktop icon is a classic Windows bitmap, so Explorer draws the logo instead of a blank shortcut.
 
 Known release boundaries are documented in README.md and SECURITY.md.
