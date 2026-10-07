@@ -12,11 +12,6 @@ function Test-Studio([int]$ListenPort) {
     }
 }
 
-function Format-Arg([string]$Value) {
-    if ($Value -match '[\s"]') { return '"' + ($Value -replace '"', '\"') + '"' }
-    return $Value
-}
-
 function Stop-Start([string]$Message) {
     Write-Host $Message
     if ($env:BSC_DESKTOP -eq '1') {
@@ -49,21 +44,9 @@ try {
         Start-Process "http://127.0.0.1:$Port/"
         return
     }
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $PythonExe
-    $psi.Arguments = ((@(
-        '-m', 'bsc', 'serve', '--port', "$Port", '--workspace', $Workspace, '--open'
-    ) | ForEach-Object { Format-Arg $_ }) -join ' ')
-    $psi.WorkingDirectory = $Root
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    if (-not $proc.Start()) { Stop-Start 'Bot Skill Creator could not start.' }
-    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-    $stderrTask = $proc.StandardError.ReadToEndAsync()
+    $proc = Start-Process -FilePath $PythonExe -ArgumentList @(
+        '-m', 'bsc', 'serve', '--port', "$Port", '--workspace', $Workspace, '--no-browser'
+    ) -WorkingDirectory $Root -WindowStyle Hidden -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(12)
     $opened = $false
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -71,13 +54,11 @@ try {
         if ($proc.HasExited) { break }
         Start-Sleep -Milliseconds 200
     }
-    if ($opened) { return }
-    if (-not $proc.HasExited) { [void]$proc.WaitForExit(2000) }
-    [void]$stdoutTask.Wait(2000)
-    [void]$stderrTask.Wait(2000)
-    $detail = ("$($stderrTask.Result)`n$($stdoutTask.Result)").Trim()
-    if ($proc.HasExited -and $proc.ExitCode -eq 0) { return }
-    if (-not $detail) { $detail = "Bot Skill Creator did not open on http://127.0.0.1:$Port/." }
-    Stop-Start $detail
+    if ($opened) {
+        Start-Process "http://127.0.0.1:$Port/"
+        return
+    }
+    if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+    Stop-Start "Bot Skill Creator did not open on http://127.0.0.1:$Port/."
 }
 finally { Pop-Location }
