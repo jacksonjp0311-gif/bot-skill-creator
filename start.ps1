@@ -19,6 +19,11 @@ function Format-Arg([string]$Value) {
 
 function Stop-Start([string]$Message) {
     Write-Host $Message
+    if ($env:BSC_DESKTOP -eq '1') {
+        Add-Type -AssemblyName System.Windows.Forms
+        [void][System.Windows.Forms.MessageBox]::Show($Message, 'Bot Skill Creator', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        exit 1
+    }
     cmd /c pause
     exit 1
 }
@@ -27,7 +32,8 @@ Push-Location $Root
 try {
     $Probe = $null
     $ProbePrefix = @()
-    if (Get-Command py -ErrorAction SilentlyContinue) { $Probe = 'py'; $ProbePrefix = @('-3') }
+    if ($env:BSC_PYTHON) { $Probe = $env:BSC_PYTHON }
+    elseif (Get-Command py -ErrorAction SilentlyContinue) { $Probe = 'py'; $ProbePrefix = @('-3') }
     elseif (Get-Command python -ErrorAction SilentlyContinue) { $Probe = 'python' }
     if (-not $Probe) { Stop-Start 'Python 3.11+ is required. Install it, reopen PowerShell, and run this script.' }
     $PythonExe = (& $Probe @ProbePrefix -c 'import sys; print(sys.executable)').Trim()

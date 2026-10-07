@@ -37,21 +37,27 @@ still works entirely offline and labels itself clearly.
 **Requires Python 3.11 or newer.** No Node.js, npm, database server, model download, or
 Python package installation is required. Git is optional unless you want to clone.
 
-Unzip the repository, open its folder, and run:
+Clone it, run the installer, then open Bot Skill Creator from the desktop icon.
 
-### macOS / Linux / Bash
-
-```bash
-cd bot-skill-creator
-bash start.sh
-```
-
-### Windows / PowerShell
+### Windows
 
 ```powershell
+git clone https://github.com/jacksonjp0311-gif/bot-skill-creator.git
 Set-Location .\bot-skill-creator
-.\start.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
+
+Or double-click `install.cmd` in the cloned folder.
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/jacksonjp0311-gif/bot-skill-creator.git
+cd bot-skill-creator
+bash install.sh
+```
+
+The installer checks Python 3.11 or newer and puts the Bot Skill Creator logo on the desktop. Click that icon to open the studio. To open it from a terminal instead, run `.\start.ps1` or `bash start.sh`.
 
 If your execution policy blocks local scripts, use the direct Python entry point:
 

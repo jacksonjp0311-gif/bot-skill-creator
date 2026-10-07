@@ -14,3 +14,4 @@ Thumbs.db
 .coverage
 .pytest_cache/
 docs/assets/smoke-export.zip
+.bsc-python

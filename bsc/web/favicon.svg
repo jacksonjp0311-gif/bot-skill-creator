@@ -1,12 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Bot Skill Creator">
-  <rect width="64" height="64" rx="18" fill="#241833"/>
-  <rect x="29.5" y="7" width="5" height="8" rx="2.5" fill="#b7a6ff"/>
-  <circle cx="32" cy="7" r="3.2" fill="#efeaff"/>
-  <rect x="13" y="16" width="38" height="32" rx="13" fill="#6d5ae6"/>
-  <rect x="9" y="27" width="6" height="10" rx="3" fill="#b7a6ff"/>
-  <rect x="49" y="27" width="6" height="10" rx="3" fill="#b7a6ff"/>
-  <rect x="19" y="25" width="26" height="14" rx="7" fill="#140f22"/>
-  <rect x="23" y="28.5" width="9" height="7" rx="3.5" fill="#f7f4ff"/>
-  <circle cx="40.5" cy="32" r="2.7" fill="#7ee0b8"/>
-  <rect x="26" y="50" width="12" height="4" rx="2" fill="#efeaff"/>
+  <rect width="64" height="64" rx="16" fill="#241833"/>
+  <rect x="30.75" y="11" width="2.5" height="7" rx="1.25" fill="#c4b6ff"/>
+  <circle cx="32" cy="10" r="2.35" fill="#f4f0ff"/>
+  <rect x="16" y="18" width="32" height="30" rx="12" fill="#6d5ae6"/>
+  <rect x="12.5" y="29" width="3.5" height="8" rx="1.75" fill="#c4b6ff"/>
+  <rect x="48" y="29" width="3.5" height="8" rx="1.75" fill="#c4b6ff"/>
+  <rect x="22" y="28" width="20" height="9" rx="4.5" fill="#140f22"/>
+  <rect x="25" y="30.5" width="6.5" height="4" rx="2" fill="#f7f4ff"/>
+  <circle cx="37.5" cy="32.5" r="1.7" fill="#7ee0b8"/>
 </svg>
