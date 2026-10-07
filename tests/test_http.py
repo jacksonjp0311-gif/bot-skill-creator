@@ -3,12 +3,13 @@ from pathlib import Path
 import json
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
 from bsc import providers
 from bsc.keystore import Keystore
-from bsc.server import AppServer
+from bsc.server import AppServer, serve
 from bsc.workspace import Workspace
 from bsc.security import InputError
 
@@ -99,6 +100,154 @@ class HTTPTests(unittest.TestCase):
             self.assertEqual(r.headers['Content-Type'],'application/zip');self.assertTrue(r.read().startswith(b'PK'))
     def test_public_bind_refused(self):
         with self.assertRaises(ValueError):AppServer(('0.0.0.0',0),self.ws)
+    def test_presence_is_idle_until_a_page_launch(self):
+        with self.request('/api/bootstrap') as response:
+            self.assertFalse(json.load(response)['until_close'])
+        with self.request('/api/presence', {'client': 'pagefallback01'}) as response:
+            body = json.load(response)
+        self.assertFalse(body['until_close'])
+        self.assertTrue(self.thread.is_alive())
+
+def _wait_until(predicate, timeout):
+    end = time.time() + timeout
+    while time.time() < end:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return False
+
+def _port_open(origin):
+    try:
+        with urllib.request.urlopen(origin + '/', timeout=0.5) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+class PageLifetimeTests(unittest.TestCase):
+    def _serve(self, directory, **kwargs):
+        holder = {}
+        started = threading.Event()
+        def run():
+            original = AppServer.__init__
+            def wrapped(self, addr, workspace):
+                AppServer.__init__ = original
+                original(self, addr, workspace)
+                holder['server'] = self
+                started.set()
+            AppServer.__init__ = wrapped
+            try:
+                serve(directory, 0, quiet=True, **kwargs)
+            finally:
+                AppServer.__init__ = original
+                started.set()
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self.assertTrue(started.wait(3))
+        self.assertIn('server', holder)
+        return holder['server'], thread
+
+    def _beat(self, server, client, token=True):
+        headers = {'Content-Type': 'application/json'}
+        if token:
+            headers['X-BSC-Token'] = server.token
+        request = urllib.request.Request(server.origin + '/api/presence', data=json.dumps({'client': client}).encode(), headers=headers)
+        return urllib.request.urlopen(request, timeout=2)
+
+    def test_page_keeps_the_server_until_it_goes_quiet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, thread = self._serve(Path(tmp), until_close=True, idle_seconds=1.5, startup_grace=5)
+            with self._beat(server, 'studio-page-a') as response:
+                self.assertTrue(json.load(response)['until_close'])
+            self.assertTrue(_port_open(server.origin))
+            time.sleep(0.4)
+            self.assertTrue(_port_open(server.origin))
+            self.assertTrue(_wait_until(lambda: not _port_open(server.origin), 4))
+            thread.join(timeout=3)
+            self.assertFalse(thread.is_alive())
+
+    def test_two_pages_hold_the_server_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, thread = self._serve(Path(tmp), until_close=True, idle_seconds=2.5, startup_grace=5)
+            self._beat(server, 'studio-page-a').close()
+            self._beat(server, 'studio-page-b').close()
+            time.sleep(1.0)
+            self._beat(server, 'studio-page-b').close()
+            self.assertTrue(_port_open(server.origin))
+            self.assertTrue(_wait_until(lambda: not _port_open(server.origin), 5))
+            thread.join(timeout=3)
+
+    def test_unused_launch_stops_without_a_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, thread = self._serve(Path(tmp), until_close=True, idle_seconds=2, startup_grace=0.6)
+            self.assertTrue(_wait_until(lambda: not _port_open(server.origin), 3))
+            thread.join(timeout=3)
+            self.assertFalse(thread.is_alive())
+
+    def test_presence_requires_the_session_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, thread = self._serve(Path(tmp), until_close=True, idle_seconds=3, startup_grace=5)
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as blocked:
+                    self._beat(server, 'studio-page-a', token=False)
+                self.assertEqual(blocked.exception.code, 400)
+                self.assertIn(b'Missing local session token', blocked.exception.read())
+                with self.assertRaises(urllib.error.HTTPError) as bad:
+                    self._beat(server, 'no', token=True)
+                self.assertEqual(bad.exception.code, 400)
+            finally:
+                server.shutdown()
+                thread.join(timeout=3)
+
+    def test_open_reuses_a_studio_that_is_already_listening(self):
+        from bsc import server as server_mod
+        opened = []
+        original = server_mod.webbrowser.open
+        server_mod.webbrowser.open = opened.append
+        try:
+            with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as other:
+                server, thread = self._serve(Path(tmp), until_close=False)
+                try:
+                    port = int(server.origin.rsplit(':', 1)[1])
+                    serve(Path(other), port, open_browser=True, quiet=True)
+                    self.assertEqual(opened, [server.origin + '/'])
+                    self.assertTrue(thread.is_alive())
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=3)
+        finally:
+            server_mod.webbrowser.open = original
+
+    def test_occupied_port_stops_without_opening_a_browser(self):
+        from bsc import server as server_mod
+        import contextlib
+        import io
+        class Quiet(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                return
+            def do_GET(self):
+                body = b'other'
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        opened = []
+        original = server_mod.webbrowser.open
+        server_mod.webbrowser.open = opened.append
+        other = ThreadingHTTPServer(('127.0.0.1', 0), Quiet)
+        thread = threading.Thread(target=other.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as raised:
+                        serve(Path(tmp), other.server_address[1], open_browser=True, quiet=True)
+            self.assertEqual(raised.exception.code, 1)
+        finally:
+            server_mod.webbrowser.open = original
+            other.shutdown()
+            other.server_close()
+            thread.join(timeout=3)
+        self.assertEqual(opened, [])
 
 class FakeProvider(BaseHTTPRequestHandler):
     seen=[]
@@ -135,6 +284,14 @@ class ProviderTests(unittest.TestCase):
         seen = FakeProvider.seen[-1]
         self.assertEqual(seen['data']['max_completion_tokens'], 4000)
         self.assertIn('Tool generation is enabled', seen['data']['messages'][0]['content'])
+    def test_draft_sends_harness_names_and_not_the_folder_path(self):
+        providers.draft(self.config, messages=[{'role':'user','content':'Triage my inbox.'}], current_plan=None,
+                        selected_operations=[], harness={'name':'hermes-agent-evo','skills':['email/himalaya'],
+                        'tools':['memory'], 'path': r'C:\secret\hermes-agent-evo'})
+        packet = json.loads(FakeProvider.seen[-1]['data']['messages'][1]['content'])
+        self.assertEqual(packet['harness']['skills'], ['email/himalaya'])
+        self.assertNotIn('secret', json.dumps(packet['harness']))
+        self.assertIn('does not need to name', FakeProvider.seen[-1]['data']['messages'][0]['content'])
     def test_no_redirect_with_credentials(self):
         FakeProvider.redirect=True
         with self.assertRaisesRegex(InputError,'HTTP 302'):self.call()

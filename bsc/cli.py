@@ -58,7 +58,8 @@ def parser():
     web = s.add_parser('serve', help='Launch the private browser studio')
     web.add_argument('--port', type=int, default=8717)
     web.add_argument('--workspace', type=Path, default=Path.home() / '.bot-skill-creator')
-    web.add_argument('--open', action='store_true')
+    web.add_argument('--open', action='store_true', help='Accepted for older commands. The studio opens with the page unless --stay is set.')
+    web.add_argument('--stay', action='store_true', help='Leave the server running until Ctrl+C and do not open a browser.')
     for command in ('create', 'preview'):
         x = s.add_parser(command, help='Compile a reviewed JSON plan or a deterministic brief template')
         x.add_argument('--brief')
@@ -93,7 +94,9 @@ def main(argv=None):
     try:
         if args.command == 'serve':
             from .server import serve
-            serve(args.workspace, args.port, args.open)
+            # Every normal launch follows the studio page. --stay is the console exception.
+            follow_page = not args.stay
+            serve(args.workspace, args.port, open_browser=follow_page, until_close=follow_page, quiet=follow_page)
             return 0
         if args.command == 'bridge':
             for line in sys.stdin:

@@ -44,13 +44,38 @@ def validate_plan(plan: dict) -> dict:
     return result
 
 
-def offline_plan(message: str, operations: list, current: dict | None = None) -> dict:
+def harness_matches(message: str, harness: dict | None) -> list[str]:
+    """Capabilities whose names share the request's words, plus skills in that same group."""
+    if not harness:
+        return []
+    words = set(re.findall(r'[a-z0-9]+', message.lower()))
+    words -= {'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'your', 'please', 'skill'}
+
+    def score(name: str) -> int:
+        return len(set(re.findall(r'[a-z0-9]+', name.lower())) & words)
+
+    skills = [name for name in harness.get('skills') or [] if isinstance(name, str)]
+    tools = [name for name in harness.get('tools') or [] if isinstance(name, str)]
+    matched = [name for name in skills if score(name)]
+    groups = {name.split('/', 1)[0] for name in matched if '/' in name}
+    chosen = []
+    for name in matched + [name for name in skills if name.split('/', 1)[0] in groups]:
+        if name not in chosen:
+            chosen.append(name)
+    chosen += [name for name in tools if score(name) and name not in chosen]
+    return chosen[:8]
+
+
+def offline_plan(message: str, operations: list, current: dict | None = None, harness: dict | None = None) -> dict:
     """Template mode is deliberately not passed off as model reasoning."""
     message = text(message, 'Brief', 10000)
     no_secrets(message)
     if current:
         plan = dict(current)
-        plan['constraints'] = (list(plan['constraints']) + [message])[-12:]
+        extra = [message]
+        if harness:
+            extra.append(f'Keep using only capabilities from the accepted harness ({harness.get("name") or "harness"}).')
+        plan['constraints'] = (list(plan['constraints']) + extra)[-12:]
         return validate_plan(plan)
     words = re.sub(r'^(please |build |create |make |a |an |skill |that |to )+', '', message.lower()).split()
     name = slug('-'.join(words[:7]))
@@ -71,6 +96,13 @@ def offline_plan(message: str, operations: list, current: dict | None = None) ->
             'constraints': ['Do not perform actions outside the user’s request.',
                             'Use only the selected operations and a host-managed credential store.',
                             'Stop on an unknown external side effect; do not automatically retry.']}
+    chosen = harness_matches(message, harness)
+    if chosen:
+        plan['steps'].insert(2, 'Use only these accepted harness capabilities: ' + ', '.join(chosen) + '.')
+        plan['constraints'].append('Do not invent a client, tool, or send step that is absent from the accepted harness.')
+    elif harness:
+        plan['constraints'].append(
+            f'The accepted harness is {harness.get("name") or "the harness"}. Use only capabilities it already has.')
     return validate_plan(plan)
 
 

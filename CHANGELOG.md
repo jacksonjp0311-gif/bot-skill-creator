@@ -24,5 +24,7 @@ Initial local release of Bot Skill Creator.
 - While a draft is running, the chat shows an orbit, a wave, and a traveling light beside the working line.
 - The README opens with light-mode and dark-mode pictures of an empty studio. No personal drafts or keys are part of the repository.
 - Saved keys can be opened again on macOS and Linux. The portable seal header is read at its real length.
+- Running the studio opens the local page and keeps the server only while that page is open. `bsc serve` does this by itself. The launcher does not leave a console waiting.
+- An accepted harness is included when a skill is drafted. The request does not have to name the skills or tools that are already in that harness.
 
 Known release boundaries are documented in README.md and SECURITY.md.

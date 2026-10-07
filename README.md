@@ -56,16 +56,16 @@ Set-Location .\bot-skill-creator
 If your execution policy blocks local scripts, use the direct Python entry point:
 
 ```powershell
-py -3 -m bsc serve --open
+py -3 -m bsc serve
 ```
 
-The studio opens at **http://127.0.0.1:8717**. Press **Ctrl+C** in the terminal to stop it.
-Use the printed `127.0.0.1` URL, not `localhost`; exact Host checks are intentional.
+The studio opens at **http://127.0.0.1:8717**. The local server starts with that page and stops after you close it.
+Open the `127.0.0.1` address, not `localhost`. The host check is exact.
 
 Alternative port or workspace:
 
 ```bash
-python3 -m bsc serve --port 8899 --workspace ./my-workspace --open
+python3 -m bsc serve --port 8899 --workspace ./my-workspace
 ```
 
 ```powershell

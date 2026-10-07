@@ -26,7 +26,7 @@ as a schema guide, replacing its example-specific details. The name must be a lo
 hyphenated slug, at most 64 characters. Required fields: name, description, goal,
 inputs, steps, success_criteria, constraints. Each array must be nonempty.
 
-The user can open the studio with `bash start.sh` or `./start.ps1`. In a harness,
+The user can open the studio with `bash start.sh` or `./start.ps1`. That starts a local server with the page and stops it when the page closes. In a harness,
 use `python <repository>/scripts/bsc.py preview --plan <plan.json>`.
 The `bridge` command accepts newline-delimited JSON. It is not MCP.
 Its preview action returns files without writing or calling a business API.

@@ -47,7 +47,7 @@ export BSC_MODEL_BASE_URL='https://YOUR-PROVIDER/v1'
 export BSC_MODEL='YOUR-MODEL-ID'
 read -rsp 'Model API key: ' BSC_MODEL_API_KEY; printf '\n'
 export BSC_MODEL_API_KEY
-python3 -m bsc serve --open
+python3 -m bsc serve
 # After stopping the server:
 unset BSC_MODEL_API_KEY
 ```
@@ -59,7 +59,7 @@ $env:BSC_MODEL_BASE_URL = 'https://YOUR-PROVIDER/v1'
 $env:BSC_MODEL = 'YOUR-MODEL-ID'
 $SecureKey = Read-Host 'Model API key' -AsSecureString
 $env:BSC_MODEL_API_KEY = [System.Net.NetworkCredential]::new('', $SecureKey).Password
-py -3 -m bsc serve --open
+py -3 -m bsc serve
 # After stopping the server:
 Remove-Item Env:BSC_MODEL_API_KEY
 ```

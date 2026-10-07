@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from . import core, openapi, providers
+from . import core, harness, openapi, providers
 from .control import Action, Authority, Controller, Outcome, Skill, ToolRule
 from .keystore import PROVIDERS, Keystore, is_ollama_url
 from .security import InputError, no_secrets, text
@@ -131,15 +131,17 @@ class Workspace:
                 raise InputError('Use the model settings for credentials, never the chat.')
             ops = [x for x in (p['api'] or {}).get('operations', []) if x['id'] in p['selected_ids']]
             messages = p['messages'] + [{'role': 'user', 'content': message}]
+            catalog = self.drafting_harness()
             if self.provider:
                 proposal = providers.draft(self.provider, messages=messages, current_plan=p['plan'],
-                                           selected_operations=ops, tool_generation=p.get('tool_generation') is True)
+                                           selected_operations=ops, tool_generation=p.get('tool_generation') is True,
+                                           harness=catalog)
                 plan = core.validate_plan(proposal)
                 reply = text(proposal.get('reply', 'Draft updated. Review the contract before export.'), 'Model reply', 1500)
                 no_secrets(reply)
                 source = 'model:' + self.provider['model']
             else:
-                plan = core.offline_plan(message, ops, p['plan'])
+                plan = core.offline_plan(message, ops, p['plan'], catalog)
                 reply = ('Added your refinement as an explicit constraint. Template mode does not infer a rewritten plan; '
                          'edit the blueprint or connect a model for semantic revisions.' if p['plan'] else
                          'Your brief is now a portable draft with required inputs, a bounded workflow, and evidence checks. '
@@ -207,6 +209,57 @@ class Workspace:
             elif provider_id in PROVIDERS and self.keystore.has(provider_id):
                 info['key_saved'] = True
             return info
+
+    def harness_file(self):
+        folder = self.path / 'harness'
+        folder.mkdir(exist_ok=True, mode=0o700)
+        return folder / 'profile.json'
+
+    def drafting_harness(self):
+        """The accepted map, read again by name only. Chat text cannot change the path."""
+        profile = self.harness_profile()
+        path = profile.get('path') if profile.get('accepted') else None
+        if not isinstance(path, str):
+            return None
+        return harness.catalog_for(path)
+
+    def harness_profile(self):
+        path = self.path / 'harness' / 'profile.json'
+        if not path.is_file():
+            return {'accepted': False}
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(data, dict) or data.get('accepted') is not True:
+            return {'accepted': False}
+        return data
+
+    def find_harness(self, extra=None):
+        return harness.find_homes(extra if isinstance(extra, str) and extra.strip() else None)
+
+    def accept_harness(self, path, agreed):
+        if agreed is not True:
+            raise InputError('Agree that this is the harness, then accept.')
+        profile = harness.accept_path(path)
+        target = self.harness_file()
+        temp = target.with_suffix('.tmp-' + secrets.token_hex(4))
+        data = core.pretty(profile)
+        no_secrets(profile)
+        with self.lock:
+            with temp.open('x', encoding='utf-8', newline='\n') as handle:
+                if os.name != 'nt':
+                    os.chmod(temp, 0o600)
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp, target)
+        return profile
+
+    def remove_harness(self):
+        """Drop the accepted map. The harness folder on disk is left alone."""
+        target = self.path / 'harness' / 'profile.json'
+        with self.lock:
+            if target.is_file():
+                target.unlink()
+        return {'accepted': False}
 
     def export(self, project_id, expected_fingerprint):
         """The local owner approves exactly the current preview; no business API runs."""

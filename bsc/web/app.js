@@ -1,7 +1,7 @@
 'use strict';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const state = {token:'', project:null, projects:[], provider:{connected:false}, file:'SKILL.md', busy:false, reviewed:null, providerPick:null, localModels:[], holdLocal:false, savedKeys:[], localSaved:null, pending:'', revealReply:false, toolGeneration:false};
+const state = {token:'', project:null, projects:[], provider:{connected:false}, file:'SKILL.md', busy:false, reviewed:null, providerPick:null, localModels:[], holdLocal:false, savedKeys:[], localSaved:null, pending:'', revealReply:false, toolGeneration:false, harness:{accepted:false}, harnessHomes:[], harnessPick:'', harnessAgreed:'', harnessPrompted:false, untilClose:false, clientId:'', holdingStudio:false};
 const PROVIDERS = [
   {id:'openai', name:'ChatGPT', maker:'OpenAI', mark:'GPT', color:'#0f766e', blurb:'Current ChatGPT chat models. The field still accepts an exact model ID.', base:'https://api.openai.com/v1', token:'max_completion_tokens', json:true, local:false, models:[
     'gpt-6-astra','gpt-6.1-sol','gpt-6-sol','gpt-6-luna',
@@ -93,10 +93,283 @@ function renderStatus() {
 function view(name) {
   $$('.view').forEach(v=>{v.hidden=v.id!==`${name}-view`;});
   $$('.nav-item').forEach(v=>v.classList.toggle('active',v.dataset.view===name));
-  $('#crumb').textContent=({studio:'Skill studio',apis:'API connections',library:'My skills',algorithm:'The algorithm'})[name];
+  $('#crumb').textContent=({studio:'Skill studio',apis:'API connections',harness:'Harness',library:'My skills',algorithm:'The algorithm'})[name];
   if(name==='apis') { renderProviderCards(); renderAPI(); }
+  if(name==='harness') renderHarness(false);
   if(name==='library') renderLibrary();
   if(name==='algorithm') calculate();
+}
+const SCAN_LINES = ['Reading this machine…', 'Checking Hermes markers…', 'Leaving secrets closed…'];
+let scanTimer = 0;
+let harnessFindBusy = false;
+function startScan(title, copy) {
+  $('#harness-dialog-title').textContent = title;
+  $('#harness-dialog-copy').textContent = copy;
+  $('#harness-scan').hidden = false;
+  $('#harness-results').hidden = true;
+  let step = 0;
+  $('#harness-scan-caption').textContent = SCAN_LINES[0];
+  clearInterval(scanTimer);
+  scanTimer = setInterval(() => {
+    step = (step + 1) % SCAN_LINES.length;
+    $('#harness-scan-caption').textContent = SCAN_LINES[step];
+  }, 900);
+}
+function stopScan() {
+  clearInterval(scanTimer);
+  scanTimer = 0;
+}
+function dwell(started, minimum = 850) {
+  const remaining = minimum - (performance.now() - started);
+  if (remaining <= 0) return Promise.resolve();
+  return new Promise(resolve => setTimeout(resolve, remaining));
+}
+function pathKey(value) {
+  return String(value || '').replace(/[\\/]+$/, '').replace(/\\/g, '/').toLowerCase();
+}
+function renderHarnessChoices() {
+  const host = $('#harness-choices');
+  host.replaceChildren();
+  const homes = state.harnessHomes || [];
+  if (!state.harnessPick && homes[0]) state.harnessPick = homes[0].path;
+  homes.forEach(home => {
+    const card = node('button', 'harness-choice' + (home.path === state.harnessPick ? ' selected' : ''));
+    card.type = 'button';
+    const memory = home.memory_files && home.memory_files.length ? home.memory_files.length + ' memory files' : 'no memory files';
+    card.append(node('strong', '', home.name || 'Hermes'));
+    card.append(node('small', '', home.path));
+    card.append(node('small', '', `${home.markers.join(' · ')} · ${home.skill_count} skills · ${memory} · ${home.tool_count} tools`));
+    card.addEventListener('click', () => {
+      state.harnessPick = home.path;
+      state.harnessAgreed = '';
+      $('#harness-agree').disabled = false;
+      $('#harness-accept').disabled = true;
+      renderHarnessChoices();
+    });
+    host.append(card);
+  });
+  $('#harness-agree').disabled = !state.harnessPick && !$('#harness-path').value.trim();
+  $('#harness-accept').disabled = !state.harnessAgreed;
+}
+function renderDirectory(tree) {
+  const host = $('#harness-directory');
+  host.replaceChildren();
+  (tree && tree.children || []).forEach(group => {
+    const block = node('div', 'dir-block');
+    block.append(node('strong', '', group.name.toUpperCase()));
+    const rows = group.children || [];
+    if (!rows.length) block.append(node('span', 'dir-empty', 'None found'));
+    rows.forEach(row => block.append(node('span', 'dir-row', row.name)));
+    host.append(block);
+  });
+}
+function renderNexus(profile, reveal) {
+  const board = $('#nexus-board');
+  board.replaceChildren();
+  const nodes = profile.nexus && profile.nexus.nodes || [];
+  const edges = profile.nexus && profile.nexus.edges || [];
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 640 460');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Nexus of the accepted harness');
+  const hub = nodes.find(item => item.id === 'harness') || {id:'harness', label:'Hermes'};
+  const rest = nodes.filter(item => item.id !== 'harness');
+  const placed = new Map([[hub.id, {x:320, y:214, r:26}]]);
+  rest.forEach((item, index) => {
+    const angle = (-Math.PI / 2) + (index / Math.max(rest.length, 1)) * Math.PI * 2;
+    const rx = rest.length > 10 ? 250 : 210;
+    placed.set(item.id, {x:320 + Math.cos(angle) * rx, y:214 + Math.sin(angle) * 150, r:item.kind === 'limit' ? 8 : 11});
+  });
+  edges.forEach(edge => {
+    const from = placed.get(edge.source);
+    const to = placed.get(edge.target);
+    if (!from || !to) return;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('class', 'nexus-edge');
+    line.setAttribute('x1', from.x);
+    line.setAttribute('y1', from.y);
+    line.setAttribute('x2', to.x);
+    line.setAttribute('y2', to.y);
+    svg.append(line);
+  });
+  nodes.forEach((item, index) => {
+    const spot = placed.get(item.id);
+    if (!spot) return;
+    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    group.setAttribute('class', 'nexus-node');
+    if (reveal) {
+      group.style.animation = 'bsc-rise .45s both';
+      group.style.animationDelay = (index * 45) + 'ms';
+    }
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('class', 'nexus-' + (item.kind || 'tool'));
+    circle.setAttribute('cx', spot.x);
+    circle.setAttribute('cy', spot.y);
+    circle.setAttribute('r', spot.r);
+    group.append(circle);
+    if (item.id !== 'harness') {
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('class', 'nexus-label');
+      label.setAttribute('x', spot.x);
+      label.setAttribute('y', spot.y + spot.r + 16);
+      label.setAttribute('text-anchor', 'middle');
+      label.textContent = item.label;
+      group.append(label);
+    }
+    svg.append(group);
+  });
+  board.append(svg);
+}
+function renderHarness(reveal) {
+  const profile = state.harness || {accepted:false};
+  const counter = $('#harness-counter');
+  if (counter) counter.textContent = profile.accepted ? 'On' : '';
+  const empty = $('#harness-empty');
+  const stage = $('#harness-stage');
+  const again = $('#harness-again');
+  const remove = $('#harness-remove');
+  if (!profile.accepted) {
+    stage.hidden = true;
+    again.hidden = true;
+    remove.hidden = true;
+    $('#harness-intro').textContent = 'Connect a model, then confirm the Hermes home. The studio reads the map and does not start it.';
+    $('#nexus-board').replaceChildren();
+    $('#harness-directory').replaceChildren();
+    empty.hidden = false;
+    empty.replaceChildren();
+    if (!state.provider.connected) {
+      empty.append(node('p', '', 'Connect a drafting model first. Then this studio looks for Hermes and asks you to confirm the folder.'));
+      const button = node('button', 'primary', 'Open API connections');
+      button.type = 'button';
+      button.addEventListener('click', () => view('apis'));
+      empty.append(button);
+      const waiting = $('#privacy-note');
+      if (waiting) waiting.textContent = draftNote();
+      return;
+    }
+    empty.append(node('p', '', 'Hermes is waiting for a location. The map is drawn only after you agree and accept.'));
+    const button = node('button', 'primary', 'Find Hermes');
+    button.type = 'button';
+    button.addEventListener('click', () => openHarnessFind());
+    empty.append(button);
+    const waiting = $('#privacy-note');
+    if (waiting) waiting.textContent = draftNote();
+    return;
+  }
+  empty.hidden = true;
+  stage.hidden = false;
+  again.hidden = false;
+  remove.hidden = false;
+  const counts = profile.counts || {};
+  $('#harness-intro').textContent = 'Accepted. This map is names and counts from the folder you confirmed.';
+  $('#nexus-note').textContent = `${counts.skills || 0} skills · ${counts.memories || 0} memory files · ${counts.tools || 0} tools`;
+  renderNexus(profile, reveal);
+  renderDirectory(profile.directory);
+  const note = $('#privacy-note');
+  if (note) note.textContent = draftNote();
+}
+async function openHarnessFind() {
+  if (!state.provider.connected || harnessFindBusy) return;
+  harnessFindBusy = true;
+  state.harnessPrompted = true;
+  state.harnessAgreed = '';
+  state.harnessPick = '';
+  $('#harness-path').value = '';
+  $('#harness-dialog').showModal();
+  startScan('Looking for Hermes.', 'The studio is checking the usual Hermes folders on this machine.');
+  const started = performance.now();
+  try {
+    const found = await api('/api/harness/find', {});
+    state.harnessHomes = found.homes || [];
+    await dwell(started);
+    stopScan();
+    $('#harness-scan').hidden = true;
+    $('#harness-results').hidden = false;
+    $('#harness-dialog-title').textContent = state.harnessHomes.length ? 'Is this the harness?' : 'No Hermes home yet.';
+    $('#harness-dialog-copy').textContent = state.harnessHomes.length ? 'Agree on the folder, then accept. The nexus is drawn after that.' : 'Paste the Hermes home, then agree and accept.';
+    renderHarnessChoices();
+  } catch (error) {
+    stopScan();
+    $('#harness-dialog').close();
+    toast(error.message);
+  } finally {
+    harnessFindBusy = false;
+  }
+}
+function maybeOfferHarness() {
+  if (!state.provider.connected || state.harness?.accepted || state.harnessPrompted) return;
+  if (document.querySelector('dialog[open]')) return;
+  openHarnessFind();
+}
+async function agreeHarness() {
+  const typed = $('#harness-path').value.trim();
+  try {
+    if (typed) {
+      const previous = new Set((state.harnessHomes || []).map(home => home.path));
+      startScan('Checking that folder.', 'Markers only. Secrets stay closed.');
+      $('#harness-results').hidden = true;
+      const started = performance.now();
+      const found = await api('/api/harness/find', {path: typed});
+      await dwell(started, 700);
+      stopScan();
+      state.harnessHomes = found.homes || [];
+      const added = state.harnessHomes.find(home => !previous.has(home.path));
+      const typedKey = pathKey(typed);
+      const chosen = added || state.harnessHomes.find(home => pathKey(home.path) === typedKey || pathKey(home.path).endsWith('/' + typedKey));
+      $('#harness-scan').hidden = true;
+      $('#harness-results').hidden = false;
+      if (!chosen) {
+        renderHarnessChoices();
+        toast('That folder does not look like Hermes. Choose the folder that contains its skills.');
+        return;
+      }
+      state.harnessPick = chosen.path;
+    }
+    if (!state.harnessPick) {
+      toast('Choose the folder first.');
+      return;
+    }
+    state.harnessAgreed = state.harnessPick;
+    $('#harness-dialog-title').textContent = 'Location agreed.';
+    $('#harness-dialog-copy').textContent = 'Accept to build the nexus and the directory.';
+    renderHarnessChoices();
+    $('#harness-accept').disabled = false;
+  } catch (error) {
+    stopScan();
+    $('#harness-scan').hidden = true;
+    $('#harness-results').hidden = false;
+    toast(error.message);
+  }
+}
+async function removeHarness() {
+  state.harness = await api('/api/harness/remove', {});
+  state.harnessPrompted = true;
+  state.harnessAgreed = '';
+  state.harnessPick = '';
+  renderHarness(false);
+  toast('Harness removed. The Hermes folder was not changed.');
+}
+async function acceptHarness() {
+  if (!state.harnessAgreed) return;
+  $('#harness-agree').disabled = true;
+  $('#harness-accept').disabled = true;
+  startScan('Building the nexus.', 'Reading names and drawing the map.');
+  const started = performance.now();
+  try {
+    state.harness = await api('/api/harness/accept', {path: state.harnessAgreed, agreed: true});
+    await dwell(started, 700);
+    stopScan();
+    $('#harness-dialog').close();
+    view('harness');
+    renderHarness(true);
+  } catch (error) {
+    stopScan();
+    $('#harness-scan').hidden = true;
+    $('#harness-results').hidden = false;
+    $('#harness-agree').disabled = false;
+    $('#harness-accept').disabled = false;
+    toast(error.message);
+  }
 }
 function modelLabel(provider) {
   const hit=(state.localModels||[]).find(model=>model.id===provider.model&&sameBase(model.base_url, provider.base_url));
@@ -104,13 +377,18 @@ function modelLabel(provider) {
   const leaf=String(provider.model||'').split(/[\\/]/).pop().replace(/\.gguf$/i,'');
   return leaf.length>32?leaf.slice(0,30)+'…':leaf;
 }
+function draftNote() {
+  const p = state.provider || {};
+  const base = p.connected ? (p.local ? 'Drafting with a local model on this machine.' : `Drafting via ${new URL(p.base_url).host}.`) : 'Offline template mode. No model requests.';
+  return state.harness && state.harness.accepted ? base + ' The accepted harness is part of the draft.' : base;
+}
 function renderProvider() {
   const p=state.provider;
   const label=p.connected?modelLabel(p):(state.localModels.length===1?'1 local model':state.localModels.length?state.localModels.length+' local models':'Template');
   $('#mode-badge').textContent=p.connected?'◉ '+label:(state.localModels.length?'◉ '+label:'◉ Template mode');
   $('#sidebar-model').textContent=p.connected?label:'Template mode';
   $('#composer-mode').textContent=label;
-  $('#privacy-note').textContent=p.connected?(p.local?'Drafting with a local model on this machine.':`Drafting via ${new URL(p.base_url).host}.`):'Offline template mode. No model requests.';
+  $('#privacy-note').textContent=draftNote();
   const status=$('#provider-status');
   if(status) status.textContent=p.connected?`Connected · ${label}`:'Template mode. No model requests yet.';
   if($('#provider-grid')) renderProviderCards();
@@ -424,6 +702,13 @@ $('#tool-generation').addEventListener('click',()=>{
   if(state.toolGeneration){run(async()=>{await setToolGeneration(false);toast('Tool generation is off.');});return;}
   $('#tool-dialog').showModal();
 });
+$('#harness-dismiss').addEventListener('click',()=>{stopScan();state.harnessPrompted=true;$('#harness-dialog').close();});
+$('#harness-close').addEventListener('click',()=>{stopScan();state.harnessPrompted=true;});
+$('#harness-again').addEventListener('click',()=>openHarnessFind());
+$('#harness-remove').addEventListener('click',()=>run(removeHarness));
+$('#harness-path').addEventListener('input',()=>{$('#harness-agree').disabled=!$('#harness-path').value.trim()&&!state.harnessPick;});
+$('#harness-agree').addEventListener('click',()=>agreeHarness());
+$('#harness-accept').addEventListener('click',()=>acceptHarness());
 $('#tool-cancel').addEventListener('click',()=>$('#tool-dialog').close());
 $('#tool-confirm').addEventListener('click',()=>run(async()=>{
   $('#tool-dialog').close();
@@ -523,6 +808,7 @@ async function useLocalModel(model) {
   renderProvider();
   showKeyConfirmation(PROVIDERS.find(item=>item.id==='local'));
   toast(state.provider.confirmation||(model.label+' linked. Saved for the next session. No API key is used.'));
+  maybeOfferHarness();
 }
 async function fetchLocalModel() {
   state.holdLocal=false;
@@ -577,6 +863,7 @@ $('#provider-form').addEventListener('submit',event=>{event.preventDefault();run
   renderProvider();
   if(preset) showKeyConfirmation(preset);
   toast(state.provider.confirmation||'Provider ready. Your next chat message will use it.');
+  maybeOfferHarness();
 });});
 $('#save-key').addEventListener('click',()=>run(async()=>{
   const preset=PROVIDERS.find(item=>item.id===state.providerPick);
@@ -620,11 +907,41 @@ if(/Mac|iPhone|iPad/.test(navigator.platform||'')||/Mac OS/.test(navigator.userA
 const queryTheme=new URLSearchParams(location.search).get('theme');
 applyTheme(queryTheme==='dark'||queryTheme==='light'?queryTheme:(document.documentElement.dataset.theme||savedTheme()));
 $('#theme-toggle').addEventListener('click',()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';try{localStorage.setItem('bsc-theme',next);}catch(error){}applyTheme(next);});
+function studioClient() {
+  const key = 'bsc-page';
+  try {
+    let id = sessionStorage.getItem(key) || '';
+    if (!/^[A-Za-z0-9_-]{8,80}$/.test(id)) {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      id = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  } catch (error) {
+    return 'pagefallback01';
+  }
+}
+function holdStudioOpen() {
+  if (!state.untilClose || !state.token || state.holdingStudio) return;
+  state.holdingStudio = true;
+  state.clientId = studioClient();
+  const beat = () => {
+    fetch('/api/presence', {method:'POST', keepalive:true, headers:{'Content-Type':'application/json','X-BSC-Token':state.token}, body:JSON.stringify({client:state.clientId})}).catch(()=>{});
+  };
+  beat();
+  setInterval(beat, 2000);
+  window.addEventListener('pagehide', beat);
+}
 (async()=>{
-  try{const data=await api('/api/bootstrap');state.token=data.token;state.projects=data.projects;state.provider=data.provider;state.savedKeys=data.saved_keys||[];state.localSaved=data.local_saved||null;renderProvider();
+  try{const data=await api('/api/bootstrap');state.token=data.token;state.untilClose=data.until_close===true;state.projects=data.projects;state.provider=data.provider;state.savedKeys=data.saved_keys||[];state.localSaved=data.local_saved||null;renderProvider();
+    holdStudioOpen();
     if(state.projects.length) await openProject(state.projects[0].id);else renderProject(await api('/api/projects',{}));await refreshLibrary();
     watchLocalModels();
     const startView=new URLSearchParams(location.search).get('view');
-    if(startView==='apis'||startView==='library'||startView==='algorithm') view(startView);
+    state.harness=await api('/api/harness');
+    renderHarness(false);
+    if(startView==='apis'||startView==='library'||startView==='algorithm'||startView==='harness') view(startView);
+    maybeOfferHarness();
   }catch(error){toast(error.message);$('#status-text').textContent='Studio could not load. Open the printed local URL.';}
 })();
