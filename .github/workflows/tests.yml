@@ -26,3 +26,5 @@ jobs:
           python -m bsc create --plan examples/inventory-plan.json --openapi examples/warehouse.openapi.json --operations listInventory --out exports
           python -m bsc validate exports/inventory-brief
           python exports/inventory-brief/scripts/validate.py
+      - name: Verify release file integrity
+        run: python scripts/verify_release.py

@@ -115,9 +115,12 @@ class Handler(BaseHTTPRequestHandler):
                 name, mime = ASSETS[path]
                 self.send(200, (WEB / name).read_bytes(), mime)
             elif path == '/api/bootstrap':
+                scope = parse_qs(parsed.query, keep_blank_values=True)
+                projects = (self.server.workspace.list(scope['harness_id'][0] or None)
+                            if 'harness_id' in scope else self.server.workspace.list())
                 self.send(200, {'version': __version__, 'token': self.server.token,
                     'until_close': self.server.until_close,
-                    'projects': self.server.workspace.list(), 'provider': self.server.workspace.provider_info(),
+                    'projects': projects, 'provider': self.server.workspace.provider_info(),
                     **self.server.workspace.secret_status()})
             elif path == '/api/local-models':
                 self.boundary(write=True)
@@ -134,11 +137,18 @@ class Handler(BaseHTTPRequestHandler):
             elif path == '/api/harness':
                 self.boundary(write=True)
                 self.send(200, self.server.workspace.harness_profile())
+            elif path == '/api/harnesses':
+                self.boundary(write=True)
+                self.send(200, self.server.workspace.harness_list())
+            elif path == '/api/draft-phase':
+                self.boundary(write=True)
+                project_id = parse_qs(parsed.query).get('id', [''])[0]
+                self.send(200, self.server.workspace.draft_status(project_id))
             else:
                 self.send(404, {'error': 'Not found.'})
         except InputError as exc:
             self.send(403, {'error': str(exc)})
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
         except Exception:
             self.send(500, {'error': 'Local operation failed. No provider credentials are included in this error.'})
@@ -162,19 +172,21 @@ class Handler(BaseHTTPRequestHandler):
             ws = self.server.workspace
             path = urlsplit(self.path).path
             if path == '/api/projects':
-                result = ws.create()
+                result = ws.create(data['harness_id']) if 'harness_id' in data else ws.create()
             elif path == '/api/projects/delete':
                 result = ws.delete(data.get('id'))
             elif path == '/api/chat':
-                result = ws.chat(data.get('id'), data.get('message'), data.get('tool_generation') if isinstance(data.get('tool_generation'), bool) else None)
-            elif path == '/api/tool-generation':
-                result = ws.set_tool_generation(data.get('id'), data.get('enabled'))
+                result = ws.chat(data.get('id'), data.get('message'))
             elif path == '/api/import':
                 result = ws.import_api(data.get('id'), data.get('document'))
             elif path == '/api/select':
                 result = ws.select(data.get('id'), data.get('selected_ids'))
             elif path == '/api/plan':
                 result = ws.edit_plan(data.get('id'), data.get('plan'))
+            elif path == '/api/validate':
+                result = ws.validate(data.get('id'))
+            elif path == '/api/install':
+                result = ws.install(data.get('id'), data.get('fingerprint'), data.get('approved'))
             elif path == '/api/provider':
                 result = ws.configure_provider(data)
             elif path == '/api/provider/key':
@@ -194,6 +206,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = ws.accept_harness(data.get('path'), data.get('agreed'))
             elif path == '/api/harness/remove':
                 result = ws.remove_harness()
+            elif path == '/api/harness/switch':
+                result = ws.switch_harness(data.get('id'))
+            elif path == '/api/harness/context':
+                result = ws.set_harness_context(data.get('id'), data.get('context'))
             elif path == '/api/presence':
                 if self.server.until_close and self.server.presence is not None:
                     self.server.presence.beat(data.get('client'))
@@ -204,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, result)
         except (InputError, ValueError, KeyError, TypeError) as exc:
             self.send(400, {'error': str(exc) if isinstance(exc, InputError) else 'Invalid request. Check the fields and try again.'})
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
         except Exception:
             self.send(500, {'error': 'Local operation failed. Existing drafts were not silently replaced. Restart or create a new revision.'})

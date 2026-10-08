@@ -33,6 +33,29 @@ def dispatch(request):
     Commands validate and preview are read-only; create writes only on explicit action.
     """
     action = request.get('action')
+    if action == 'workspace':
+        from .workspace import Workspace
+        ws = Workspace(Path(request['workspace']))
+        operation = request.get('operation')
+        if operation == 'harnesses':
+            return ws.harness_list()
+        if operation == 'connect':
+            return ws.accept_harness(request.get('path'), request.get('agreed'))
+        if operation == 'switch':
+            return ws.switch_harness(request.get('harness_id'))
+        if operation == 'context':
+            return ws.set_harness_context(request.get('harness_id'), request.get('context'))
+        if operation == 'projects':
+            return ws.list()
+        if operation == 'create':
+            return ws.create(request['harness_id']) if 'harness_id' in request else ws.create()
+        if operation == 'chat':
+            return ws.chat(request.get('id'), request.get('message'))
+        if operation == 'validate':
+            return ws.validate(request.get('id'))
+        if operation == 'install':
+            return ws.install(request.get('id'), request.get('fingerprint'), request.get('approved'))
+        raise InputError('Unknown workspace operation.')
     if action == 'score':
         return core.score(**request.get('counts', {}))
     if action == 'import':
@@ -87,6 +110,8 @@ def parser():
     r.add_argument('--cost', type=float, default=.2)
     r.add_argument('--weight', type=float, default=.15)
     s.add_parser('bridge', help='Read one JSON request per stdin line; emit one JSON response per line')
+    w = s.add_parser('workspace', help='Use the same persistent harness workflow as the studio')
+    w.add_argument('--request-file', type=Path, required=True, help='JSON request with workspace and operation fields')
     return p
 
 
@@ -113,7 +138,10 @@ def main(argv=None):
                     result = {'ok': False, 'error': str(exc) if isinstance(exc, InputError) else 'Invalid bridge request or local operation failed.'}
                 print(json.dumps(result, ensure_ascii=False), flush=True)
             return 0
-        if args.command in {'create', 'preview'}:
+        if args.command == 'workspace':
+            request = json.loads(args.request_file.read_text(encoding='utf-8'))
+            result = dispatch({**request, 'action': 'workspace'})
+        elif args.command in {'create', 'preview'}:
             api = openapi.import_document(args.openapi.read_text(encoding='utf-8')) if args.openapi else None
             selected = [x.strip() for x in args.operations.split(',') if x.strip()]
             if args.plan:

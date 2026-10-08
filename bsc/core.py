@@ -9,6 +9,7 @@ import re
 import zipfile
 from .control import Reliability
 from .security import InputError, no_secrets, slug, text, valid_slug
+from . import contracts
 
 ROOT = Path(__file__).resolve().parent.parent
 STAGES = ['OBSERVE', 'SELECT', 'LOAD', 'GATE', 'ISSUE', 'VERIFY', 'RECORD']
@@ -40,30 +41,402 @@ def validate_plan(plan: dict) -> dict:
         'success_criteria': lines(plan.get('success_criteria'), 'Success criteria', 8, 1500),
         'constraints': lines(plan.get('constraints'), 'Constraints', 12, 1500),
     }
+    if 'capability_calls' in plan:
+        result['capability_calls'] = contracts.declarations(plan['capability_calls'])
     no_secrets(result)
     return result
+
+
+HARNESS_STOP = {'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'your', 'please', 'skill', 'write', 'bot'}
+GENERIC_TOOL_TOKENS = {
+    'use', 'to', 'a', 'an', 'the', 'of', 'in', 'on', 'it', 'or', 'with',
+    'search', 'message', 'messages', 'post', 'posts', 'send', 'read', 'list', 'get',
+    'open', 'close', 'click', 'type', 'scroll', 'name', 'public', 'topic', 'direct',
+    'reply', 'like', 'show', 'add', 'remove', 'clear',
+}
+HARNESS_ALIASES = {
+    'server': 'guilds', 'servers': 'guilds', 'guild': 'servers', 'guilds': 'server',
+    'message': 'messages', 'messages': 'message',
+    'role': 'roles', 'roles': 'role',
+    'thread': 'threads', 'threads': 'thread',
+    'channel': 'channels', 'channels': 'channel',
+}
+
+
+def harness_words(message: str) -> set[str]:
+    words = set(re.findall(r'[a-z0-9]+', positive_request(message).lower())) - HARNESS_STOP
+    return words | {HARNESS_ALIASES[word] for word in words if word in HARNESS_ALIASES}
+
+
+def positive_request(message: str) -> str:
+    # Template routing must not recruit a capability from an explicitly forbidden clause.
+    return '. '.join(re.split(r"\b(?:do not|does not|don't|never|without|unless)\b", clause, flags=re.I)[0]
+                     for clause in re.split(r'[.!?;]', message))
+
+
+def _tokens(name: str) -> set[str]:
+    return set(re.findall(r'[a-z0-9]+', name.lower()))
+
+
+def _contract_name(item: object) -> str | None:
+    if isinstance(item, str) and item.strip():
+        return item.strip()
+    if isinstance(item, dict) and isinstance(item.get('name'), str) and item['name'].strip():
+        return item['name'].strip()
+    return None
+
+
+def tool_entries(harness: dict | None) -> list[dict]:
+    entries = []
+    if not harness:
+        return entries
+    for item in harness.get('tools') or []:
+        if isinstance(item, str):
+            entries.append({'name': item, 'actions': [item], 'inputs': []})
+        elif isinstance(item, dict) and isinstance(item.get('name'), str):
+            actions = [name for name in (_contract_name(action) for action in item.get('actions') or []) if name]
+            inputs = [name for name in (_contract_name(field) for field in item.get('inputs') or []) if name]
+            entries.append({'name': item['name'], 'actions': actions[:24], 'inputs': inputs[:12]})
+    return entries
+
+
+def chosen_tools(message: str, harness: dict | None) -> list[dict]:
+    """The tool whose own name fits the job. A shared action word does not recruit another tool."""
+    words = harness_words(message)
+    ranked = []
+    for entry in tool_entries(harness):
+        score = len((_tokens(entry['name']) - GENERIC_TOOL_TOKENS) & words)
+        if score:
+            ranked.append((score, entry))
+    if not ranked:
+        return []
+    best = max(score for score, _entry in ranked)
+    winners = []
+    for score, entry in ranked:
+        if score != best or entry['name'] in {item['name'] for item in winners}:
+            continue
+        action_words = _job_words(message)
+        ranked_actions = [(len(_tokens(action) & action_words), action) for action in entry['actions']]
+        best_action = max((score for score, _action in ranked_actions), default=0)
+        hits = [action for score, action in ranked_actions if score == best_action and score > 0]
+        chosen = dict(entry)
+        chosen['actions'] = hits or ([entry['name']] if entry['name'] in entry['actions'] else [])
+        winners.append(chosen)
+    return winners
 
 
 def harness_matches(message: str, harness: dict | None) -> list[str]:
     """Capabilities whose names share the request's words, plus skills in that same group."""
     if not harness:
         return []
-    words = set(re.findall(r'[a-z0-9]+', message.lower()))
-    words -= {'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'your', 'please', 'skill'}
+    words = harness_words(message)
 
     def score(name: str) -> int:
-        return len(set(re.findall(r'[a-z0-9]+', name.lower())) & words)
+        return len((_tokens(name) - GENERIC_TOOL_TOKENS) & words)
 
-    skills = [name for name in harness.get('skills') or [] if isinstance(name, str)]
-    tools = [name for name in harness.get('tools') or [] if isinstance(name, str)]
+    skills = [name for name in harness.get('skills') or [] if isinstance(name, str) and 'skill-authoring' not in name]
     matched = [name for name in skills if score(name)]
     groups = {name.split('/', 1)[0] for name in matched if '/' in name}
     chosen = []
     for name in matched + [name for name in skills if name.split('/', 1)[0] in groups]:
         if name not in chosen:
             chosen.append(name)
-    chosen += [name for name in tools if score(name) and name not in chosen]
+    for entry in chosen_tools(message, harness):
+        label = entry['name']
+        extra = [action for action in entry['actions'] if action != entry['name']]
+        if extra:
+            label += ' (' + ', '.join(extra[:6]) + ')'
+        if entry.get('inputs'):
+            label += ' inputs ' + ', '.join(entry['inputs'][:4])
+        if label not in chosen:
+            chosen.append(label)
     return chosen[:8]
+
+
+GENERIC_VERBS = {
+    'read', 'search', 'create', 'edit', 'write', 'send', 'list', 'get', 'show',
+    'open', 'find', 'update', 'delete', 'make', 'help', 'use', 'run', 'review',
+    'draft', 'reply', 'replies', 'organize',
+}
+GENERIC_CAPABILITY = GENERIC_VERBS | {
+    'email', 'emails', 'mail', 'message', 'messages', 'inbox', 'file', 'files',
+    'note', 'notes', 'web', 'page', 'chat', 'tool', 'tools', 'cli', 'api', 'app',
+}
+VERB_ACTIONS = {
+    'save': {'add'}, 'remember': {'add'}, 'show': {'list', 'get', 'fetch'},
+    'read': {'search', 'get', 'fetch', 'list', 'show'},
+    'write': {'send', 'create', 'compose', 'draft'},
+    'compose': {'send', 'create', 'draft'},
+    'draft': {'draft', 'send', 'reply'},
+    'respond': {'reply', 'send'},
+    'reply': {'reply'},
+    'organize': {'modify', 'label', 'labels', 'archive', 'move'},
+    'archive': {'modify', 'archive'},
+    'label': {'label', 'labels', 'modify'},
+    'search': {'search', 'find'},
+    'find': {'search', 'find'},
+    'delete': {'delete'},
+    'send': {'send'},
+    'triage': {'triage', 'classify'},
+}
+APPROVAL_WORDS = {'send', 'reply', 'delete', 'modify', 'remove'}
+
+
+def _stem(words: set[str]) -> set[str]:
+    extra = set()
+    for word in words:
+        if len(word) > 4 and word.endswith('s') and not word.endswith('ss'):
+            extra.add(word[:-1])
+    return words | extra
+
+
+def _surface_words(message: str) -> set[str]:
+    """Words the user actually wrote. Verb targets such as send are not included."""
+    raw = set(re.findall(r'[a-z0-9]+', positive_request(message).lower()))
+    return _stem(raw - HARNESS_STOP) | {HARNESS_ALIASES[word] for word in raw if word in HARNESS_ALIASES}
+
+
+def _job_words(message: str) -> set[str]:
+    """Surface words plus the actions those verbs stand for. write reaches send and draft."""
+    raw = set(re.findall(r'[a-z0-9]+', positive_request(message).lower()))
+    extra = set()
+    for word in raw:
+        extra |= VERB_ACTIONS.get(word, set())
+        if len(word) > 4 and word.endswith('s') and not word.endswith('ss'):
+            extra |= VERB_ACTIONS.get(word[:-1], set())
+    return _surface_words(message) | extra
+
+
+def _leaf(name: str) -> str:
+    return name.split('/')[-1].lower()
+
+
+def skill_contracts(harness: dict | None) -> list[dict]:
+    if not harness:
+        return []
+    contracts = []
+    for item in harness.get('skill_contracts') or []:
+        if isinstance(item, dict) and isinstance(item.get('name'), str):
+            contracts.append(item)
+    return contracts
+
+
+def _command_actions(contract: dict) -> list[dict]:
+    return [action for action in contract.get('actions') or []
+            if isinstance(action, dict) and action.get('kind') == 'command' and isinstance(action.get('name'), str)]
+
+
+def _matching_commands(contract: dict, words: set[str], surface: set[str], skill_matched: bool) -> list[dict]:
+    """Commands whose product word is in the job, narrowed to the verbs the job used."""
+    if not skill_matched:
+        return []
+    actions = _command_actions(contract)
+    groups: dict[str, list[dict]] = {}
+    for action in actions:
+        parts = action['name'].split()
+        key = parts[0] if len(parts) >= 2 else ''
+        groups.setdefault(key, []).append(action)
+    selected = []
+    for key, items in groups.items():
+        if not key or key not in surface:
+            continue
+        hits = []
+        for action in items:
+            rest = _tokens(action['name']) - {key} - HARNESS_STOP
+            if rest & words:
+                hits.append(action)
+        selected.extend(hits or items)
+    if selected:
+        return selected[:8]
+    hits = [action for action in actions if (_tokens(action['name']) & surface)]
+    return hits[:8]
+
+
+def linked_skills(message: str, harness: dict | None) -> list[dict]:
+    """The skills this job has to be woven into, with only the actions it needs."""
+    if any(tool['actions'] for tool in chosen_tools(message, harness)):
+        return []  # Prefer a directly matched tool over unrelated prose/command word overlap.
+    surface = {word for word in _surface_words(message) if len(word) >= 3}
+    words = {word for word in _job_words(message) if len(word) >= 3}
+    scored = []
+    for contract in skill_contracts(harness):
+        if contract['name'].startswith('custom/'):
+            continue
+        leaf_tokens = _stem({word for word in _tokens(_leaf(contract['name'])) if len(word) >= 3})
+        summary_tokens = _stem({word for word in _tokens(contract.get('summary') or '') if len(word) >= 3})
+        name_hit = (leaf_tokens - GENERIC_CAPABILITY - HARNESS_STOP) & surface
+        summary_hits = (summary_tokens - GENERIC_CAPABILITY - HARNESS_STOP) & surface
+        product = 1 if any(
+            action['name'].split()[0] in surface for action in _command_actions(contract)
+        ) else 0
+        matched = bool(name_hit or product or len(summary_hits) >= 2)
+        commands = _matching_commands(contract, words, surface, matched)
+        score = 5 * len(name_hit) + 5 * len(summary_hits) + product * 5 + min(4, len(commands))
+        if not matched or score <= 0:
+            continue
+        scored.append({
+            'contract': contract,
+            'score': score,
+            'commands': commands,
+            'product': product,
+            'procedure': not _command_actions(contract),
+        })
+    if not scored:
+        return []
+    scored.sort(key=lambda item: (item['score'], item['product'], len(item['commands'])), reverse=True)
+    best = scored[0]
+    chosen = [best]
+    if best['procedure']:
+        related = {_leaf(name) for name in best['contract'].get('related') or []}
+        pool = []
+        for item in scored[1:]:
+            if not item['commands']:
+                continue
+            leaf = _leaf(item['contract']['name'])
+            linked = leaf in related or _leaf(best['contract']['name']) in {
+                _leaf(name) for name in item['contract'].get('related') or []}
+            if linked or item['product']:
+                pool.append(item)
+        pool.sort(key=lambda item: (item['product'], item['score']), reverse=True)
+        if pool:
+            chosen.append(pool[0])
+    else:
+        winner_leaf = _leaf(best['contract']['name'])
+        winner_related = {_leaf(name) for name in best['contract'].get('related') or []}
+        seen = {best['contract']['name']}
+        for contract in skill_contracts(harness):
+            if contract['name'] in seen or contract['name'].startswith('custom/'):
+                continue
+            if _command_actions(contract):
+                continue
+            related = {_leaf(name) for name in contract.get('related') or []}
+            if winner_leaf not in related and _leaf(contract['name']) not in winner_related:
+                continue
+            blob = _stem({word for word in (_tokens(contract['name']) | _tokens(contract.get('summary') or ''))
+                          if len(word) >= 3})
+            if not ((blob & surface) - GENERIC_VERBS - HARNESS_STOP):
+                continue
+            chosen.append({'contract': contract, 'commands': [], 'procedure': True})
+            seen.add(contract['name'])
+            if len(chosen) >= 3:
+                break
+    links = []
+    for item in chosen[:3]:
+        contract = item['contract']
+        actions = list(item['commands'])
+        if not actions:
+            headings = [action for action in contract.get('actions') or []
+                        if isinstance(action, dict) and action.get('kind') == 'heading']
+            hits = [action for action in headings if _tokens(action.get('name') or '') & words]
+            actions = (hits or headings)[:4]
+        links.append({
+            'name': contract['name'],
+            'summary': contract.get('summary') or '',
+            'related': [name for name in contract.get('related') or [] if isinstance(name, str)][:6],
+            'actions': actions,
+        })
+    return links
+
+
+def linked_steps(message: str, harness: dict | None) -> list[str]:
+    """Deterministic calls so a template draft is tied to the harness too."""
+    steps = []
+    names = harness_matches(message, harness)
+    if names:
+        steps.append('Use only these accepted harness capabilities: ' + ', '.join(names) + '.')
+    for entry in linked_skills(message, harness):
+        commands = [action for action in entry['actions'] if action.get('kind') == 'command']
+        if not commands:
+            related = ', '.join(entry['related'][:4])
+            line = f"Use {entry['name']} for the judgment its summary already owns"
+            line += f". It links to {related}." if related else '.'
+            steps.append(line)
+            continue
+        for action in commands:
+            requires = [item for item in action.get('requires') or [] if isinstance(item, str)]
+            line = f"Use {entry['name']}. Call {action['name']}"
+            if requires:
+                line += ' with ' + ', '.join(requires)
+            if action.get('note'):
+                line += ' (' + action['note'] + ')'
+            if _tokens(action['name']) & APPROVAL_WORDS:
+                line += '. Do this only after the user approves that exact action'
+            steps.append(line + '.')
+    if any('MESSAGE_ID' in step for step in steps) and any('search' in step.lower() for step in steps):
+        steps.append('When a later call needs MESSAGE_ID and the user did not give one, take it from the earlier search result.')
+    return steps[:12]
+
+
+def interlink_gaps(plan: dict | None, message: str, harness: dict | None) -> list[str]:
+    """Actions the job needs that the steps never name."""
+    if not harness or not isinstance(plan, dict):
+        return []
+    blob = '\n'.join(step for step in plan.get('steps') or [] if isinstance(step, str)).lower()
+    missing = []
+    for entry in linked_skills(message, harness):
+        commands = [action for action in entry['actions'] if action.get('kind') == 'command']
+        if commands:
+            for action in commands:
+                if action['name'].lower() not in blob:
+                    missing.append(entry['name'] + ': ' + action['name'])
+            continue
+        leaf = _leaf(entry['name'])
+        if leaf not in blob and entry['name'].lower() not in blob:
+            missing.append(entry['name'])
+    for tool in chosen_tools(message, harness):
+        for action in tool['actions']:
+            if action == tool['name']:
+                if not _mentions(blob, tool['name']):
+                    missing.append(tool['name'])
+            elif action.lower() not in blob:
+                missing.append(tool['name'] + ': ' + action)
+    return missing[:12]
+
+
+def bind_harness(plan: dict, message: str, harness: dict | None) -> dict:
+    """Drop authoring, a tool the request did not name, and a refusal of a listed tool.
+
+    The model writes the procedure from the tool contract. This pass does not invent steps.
+    """
+    if not harness or not isinstance(plan, dict):
+        return plan
+    words = harness_words(message)
+    steps = []
+    for step in plan.get('steps') or []:
+        if not isinstance(step, str):
+            continue
+        if 'skill-authoring' in step and 'authoring' not in words:
+            continue
+        step = re.sub(r'\blocal\s+([A-Za-z0-9_]+)\s+tool\b', r'\1 tool', step, flags=re.IGNORECASE)
+        step = re.sub(r'\bthe local tool\b', 'the harness tool', step, flags=re.IGNORECASE)
+        steps.append(step)
+    winners = chosen_tools(message, harness)
+    winner_names = {entry['name'] for entry in winners}
+    other_tools = []
+    if winner_names:
+        other_tools = [entry['name'] for entry in tool_entries(harness) if entry['name'] not in winner_names]
+    kept = []
+    for step in steps:
+        lowered = step.lower()
+        if 'no available actions' in lowered or 'lists no actions' in lowered or 'missing capability' in lowered:
+            continue
+        if other_tools and any(re.search(r'\b' + re.escape(name) + r'\b', step, re.IGNORECASE) for name in other_tools):
+            continue
+        kept.append(step)
+    steps = kept
+    if not steps:
+        steps = ['State the missing harness capability and stop.']
+    constraints = [item for item in plan.get('constraints') or [] if isinstance(item, str)
+                   and 'no available actions' not in item.lower() and 'lists no actions' not in item.lower()]
+    limit = 'This skill runs on the accepted harness. Do not add a local tool, a Python checker, or an API operation id.'
+    if limit not in constraints:
+        constraints.append(limit)
+    bound = dict(plan)
+    bound['steps'] = steps[:16]
+    bound['constraints'] = constraints[:12]
+    if 'capability_calls' not in bound:
+        bound['capability_calls'] = contracts.infer_calls(bound, harness)
+    return bound
 
 
 def offline_plan(message: str, operations: list, current: dict | None = None, harness: dict | None = None) -> dict:
@@ -96,10 +469,24 @@ def offline_plan(message: str, operations: list, current: dict | None = None, ha
             'constraints': ['Do not perform actions outside the user’s request.',
                             'Use only the selected operations and a host-managed credential store.',
                             'Stop on an unknown external side effect; do not automatically retry.']}
-    chosen = harness_matches(message, harness)
-    if chosen:
-        plan['steps'].insert(2, 'Use only these accepted harness capabilities: ' + ', '.join(chosen) + '.')
-        plan['constraints'].append('Do not invent a client, tool, or send step that is absent from the accepted harness.')
+    extra = linked_steps(message, harness)
+    if harness:
+        calls = []
+        known = contracts.surface(harness)
+        for entry in chosen_tools(message, harness):
+            for action in entry['actions']:
+                key = ('tool', entry['name'], action)
+                if key not in known:
+                    continue
+                inputs = {name: 'Ask the user for ' + name + ' or use an earlier verified result.' for name in known[key]}
+                calls.append({'kind': 'tool', 'name': entry['name'], 'action': action, 'inputs': inputs})
+                extra.append('Call ' + entry['name'] + '.' + action + (' with ' + ', '.join(inputs) if inputs else '') + '.')
+        existing = {(c['kind'], c['name'], c['action']) for c in calls}
+        plan['capability_calls'] = calls + [c for c in contracts.infer_calls({'steps': extra}, harness)
+                                          if (c['kind'], c['name'], c['action']) not in existing]
+    if extra:
+        plan['steps'] = (plan['steps'][:2] + extra + plan['steps'][2:])[:16]
+        plan['constraints'].append('Do not invent a client, command, or send step that is absent from the accepted harness.')
     elif harness:
         plan['constraints'].append(
             f'The accepted harness is {harness.get("name") or "the harness"}. Use only capabilities it already has.')
@@ -126,10 +513,14 @@ def workflow(plan: dict) -> dict:
         'prohibited': ['self_issued_approval', 'unreviewed_code_execution', 'credential_export', 'silent_retry_after_unknown']}
 
 
-def render_skill(plan: dict, api: dict | None, operations: list, tool_generation: bool = False) -> str:
+def render_skill(plan: dict, api: dict | None, operations: list) -> str:
     quote = lambda x: json.dumps(x, ensure_ascii=False)
     listing = '\n'.join(f'- `{x["id"]}` — {x["method"]} `{x["path"]}`' for x in operations) or '- No API operations selected. Use only explicitly provided sources.'
     numbered = '\n'.join(f'{i}. {x}' for i, x in enumerate(plan['steps'], 1))
+    if plan.get('capability_calls'):
+        numbered += '\n\n### Declared harness calls\n' + '\n'.join(
+            '- ' + c['name'] + ' / ' + c['action'] + ': ' + json.dumps(c['inputs'], ensure_ascii=False)
+            for c in plan['capability_calls'])
     return f'''---
 name: {plan['name']}
 description: {quote(plan['description'])}
@@ -177,7 +568,7 @@ Stop for missing capabilities, unresolved scope, insufficient budget, changed ap
 invalid credentials, or an unknown external side effect. Do not bypass these boundaries.
 Return outcome, supporting evidence, unresolved questions, and any next authorized step.
 Do not claim the skill was live-tested: only its package structure was validated.
-{tool_section(tool_generation)}
+
 ## Supporting files
 - [Machine-readable workflow](references/workflow.json)
 - [Integration requirements](references/HARNESS.md)
@@ -235,65 +626,9 @@ host, not as a signing tool exposed to the model. Its database is not a security
 '''
 
 
-def tool_section(enabled: bool) -> str:
-    if not enabled:
-        return ''
-    return '''
-## Local tool
-`tools/run_tool.py` is included because tool generation is on. It checks the required inputs and returns a draft on this machine. It does not call the network, send mail, or perform a live action. Pass a JSON object on standard input:
-
-```text
-python tools/run_tool.py
-```
-
-A live account action still needs the host to approve the exact action.
-'''
-
-
-def local_tool_source(plan: dict, operations: list) -> str:
-    """Compiler-owned tool. The model does not write this Python."""
-    payload = {'name': plan['name'], 'goal': plan['goal'], 'inputs': plan['inputs'],
-               'steps': plan['steps'], 'success_criteria': plan['success_criteria'],
-               'constraints': plan['constraints'],
-               'operations': [{'id': op['id'], 'method': op['method'], 'path': op['path']} for op in operations]}
-    embedded = json.dumps(json.dumps(payload, ensure_ascii=False), ensure_ascii=False)
-    return f'''"""Local draft tool. It checks inputs and returns a draft. It does not call the network."""
-import json
-import sys
-
-PLAN = json.loads({embedded})
-REFUSALS = ("send", "delete", "purchase", "post", "charge", "pay", "dispatch")
-
-
-def run(payload):
-    if not isinstance(payload, dict):
-        return {{"ok": False, "outcome": "NEEDS_INPUT", "missing": PLAN["inputs"], "skill": PLAN["name"]}}
-    effect = str(payload.get("requested_effect") or "").lower()
-    if any(word in effect for word in REFUSALS):
-        return {{"ok": False, "outcome": "REFUSED", "skill": PLAN["name"],
-                "reason": "This tool drafts on this machine. A live action needs host approval."}}
-    supplied = payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {{}}
-    missing = [item for item in PLAN["inputs"] if not str(supplied.get(item) or "").strip()]
-    if missing:
-        return {{"ok": False, "outcome": "NEEDS_INPUT", "missing": missing, "skill": PLAN["name"]}}
-    return {{"ok": True, "outcome": "DRAFT", "skill": PLAN["name"], "goal": PLAN["goal"],
-            "steps": PLAN["steps"], "constraints": PLAN["constraints"],
-            "operations": PLAN["operations"], "live_verified": False, "network": False}}
-
-
-if __name__ == "__main__":
-    raw = sys.stdin.read()
-    try:
-        incoming = json.loads(raw) if raw.strip() else {{}}
-    except json.JSONDecodeError:
-        incoming = {{}}
-    json.dump(run(incoming), sys.stdout, ensure_ascii=False)
-    sys.stdout.write("\\n")
-'''
-
-
 def compile_package(plan: dict, api: dict | None = None, selected_ids: list | None = None,
                     tool_generation: bool = False) -> dict[str, bytes]:
+    del tool_generation
     plan = validate_plan(plan)
     selected_ids = selected_ids or []
     if not isinstance(selected_ids, list) or any(not isinstance(x, str) for x in selected_ids):
@@ -307,9 +642,8 @@ def compile_package(plan: dict, api: dict | None = None, selected_ids: list | No
     contract.update({'operations': operations, 'connection_status': 'host_adapter_required'})
     no_secrets(contract)
     notes = [f'- `{x["id"]}`: {x["method"]} `{x["path"]}`' for x in operations]
-    tool_tree = '├── tools/\n│   └── run_tool.py\n' if tool_generation else ''
     files = {
-        'SKILL.md': render_skill(plan, api, operations, tool_generation),
+        'SKILL.md': render_skill(plan, api, operations),
         'README.md': f'''# {plan['name'].replace('-', ' ').title()}
 
 {plan['description']}
@@ -317,9 +651,9 @@ def compile_package(plan: dict, api: dict | None = None, selected_ids: list | No
 **Status: exported draft. Static checks passed; behavior has not been live-tested.**
 
 ## Use it
-Read [SKILL.md](SKILL.md) or place this entire folder in your harness's configured skills directory.
-Review [the host contract](references/HARNESS.md) before connecting tools. The location and
-invocation syntax depend on your harness. No automatic installation or execution occurs.
+Read [SKILL.md](SKILL.md). When a harness is accepted, the studio copies this folder into
+that harness only after validation and explicit review approval. Existing skills are never overwritten.
+Review [the host contract](references/HARNESS.md) before connecting tools. The skill is not run.
 
 ## Check it
 Bash: `python3 scripts/validate.py`\n\nPowerShell: `py -3 scripts/validate.py`
@@ -334,7 +668,7 @@ Bash: `python3 scripts/validate.py`\n\nPowerShell: `py -3 scripts/validate.py`
 ├── README.md
 ├── manifest.json
 ├── skill.json
-{tool_tree}├── references/
+├── references/
 │   ├── api-contract.json
 │   ├── workflow.json
 │   ├── HARNESS.md
@@ -346,16 +680,14 @@ Review credentials, data handling, rights, and task-specific constraints before 
 Bot Skill Creator does not assign a license to your generated content.
 ''',
         'skill.json': pretty({'schema_version': '1.0', 'name': plan['name'], 'version': '0.1.0',
-             'plan': plan, 'runtime_mode': 'instruction_package_with_local_tool' if tool_generation else 'instruction_package',
-             'tool_generation': bool(tool_generation), 'live_verified': False,
+             'plan': plan, 'runtime_mode': 'instruction_package',
+             'tool_generation': False, 'live_verified': False,
              'selected_operations': selected_ids}),
         'references/api-contract.json': pretty(contract),
         'references/workflow.json': pretty(workflow(plan)),
         'references/HARNESS.md': HARNESS,
         'scripts/validate.py': VALIDATOR,
     }
-    if tool_generation:
-        files['tools/run_tool.py'] = local_tool_source(plan, operations)
     math_path = ROOT / 'docs' / 'MATH.md'
     files['references/MATH.md'] = math_path.read_text(encoding='utf-8') if math_path.exists() else '# Routing mathematics\n\nq=(S+F+2)/(S+F+U+3); mu=(S+1)/(S+F+2); theta=q*mu.\n'
     result = {k: v.encode('utf-8') for k, v in files.items()}
@@ -387,18 +719,8 @@ def validate_files(files: dict[str, bytes]) -> dict:
             errors.append('Frontmatter name mismatch.')
         if meta.get('live_verified') is not False:
             errors.append('Unsupported live verification claim.')
-        wants_tool = meta.get('tool_generation') is True
-        tool_name = 'tools/run_tool.py'
-        if wants_tool and tool_name not in files:
-            errors.append('Tool generation is on, and the local tool is missing.')
-        if wants_tool and tool_name in files:
-            tool_text = files[tool_name].decode('utf-8')
-            if 'does not call the network' not in tool_text or 'urllib' in tool_text or 'socket' in tool_text:
-                errors.append('The local tool is not the compiler draft tool.')
-            if meta['name'] not in tool_text:
-                errors.append('The local tool does not match this skill.')
-        if not wants_tool and tool_name in files:
-            errors.append('A local tool is present while tool generation is off.')
+        if meta.get('tool_generation') is True or 'tools/run_tool.py' in files:
+            errors.append('A skill package does not include a generated local tool.')
         flow = json.loads(files['references/workflow.json'])
         if [x['id'] for x in flow['stages']] != STAGES or flow['host_enforcement_required'] is not True:
             errors.append('Control loop is missing or changed.')
@@ -438,6 +760,66 @@ def zip_bytes(name: str, files: dict[str, bytes]) -> bytes:
             if archive.read(name + '/' + path) != content:
                 raise InputError('Export round-trip mismatch.')
     return raw
+
+
+def _mentions(blob: str, name: str) -> bool:
+    return re.search(r'\b' + re.escape(name.lower()) + r'\b', blob) is not None
+
+
+def sandbox_package(plan: dict, api: dict | None, selected_ids: list | None, catalog: dict | None,
+                    message: str = '') -> dict:
+    """Check the package in a temporary folder. The skill is not run and no harness is started."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+    errors = []
+    files = compile_package(plan, api, selected_ids)
+    report = validate_files(files)
+    if not report['ok']:
+        return {'ok': False, 'errors': report['errors'], 'live_verified': False}
+    if catalog:
+        errors.extend(contracts.errors(plan, catalog))
+        blob = '\n'.join(plan.get('steps') or []).lower()
+        for token in re.findall(r'\b([a-z][a-z0-9_]{2,48})_tool\b', blob):
+            if token not in {entry['name'] for entry in tool_entries(catalog)}:
+                errors.append('The skill names a tool the harness does not have: ' + token + '_tool.')
+        names = [entry['name'] for entry in tool_entries(catalog)]
+        skills = [name for name in catalog.get('skills') or [] if isinstance(name, str)]
+        used = any(_mentions(blob, name) for name in names) or any(_mentions(blob, name) for name in skills)
+        if (names or skills) and not used:
+            errors.append('The skill does not name a tool or skill from the harness.')
+        if message:
+            gaps = interlink_gaps(plan, message, catalog)
+            if gaps:
+                errors.append('The skill does not interlink the harness: ' + '; '.join(gaps[:8]) + '.')
+    folder = Path(tempfile.mkdtemp(prefix='bsc-sandbox-'))
+    try:
+        for name, content in files.items():
+            path = folder / plan['name'] / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        package = folder / plan['name']
+        env = {'PYTHONDONTWRITEBYTECODE': '1'}
+        for key in ('SYSTEMROOT', 'WINDIR', 'PATH', 'PATHEXT', 'TEMP', 'TMP'):
+            if os.environ.get(key):
+                env[key] = os.environ[key]
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(package / 'scripts' / 'validate.py')],
+                cwd=package, env=env, capture_output=True, timeout=20, check=False)
+        except subprocess.TimeoutExpired:
+            errors.append('The sandbox check timed out.')
+            completed = None
+        except OSError:
+            errors.append('The sandbox could not run the package check.')
+            completed = None
+        if completed is not None and completed.returncode != 0:
+            errors.append('The sandbox package check failed.')
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    return {'ok': not errors, 'errors': errors, 'live_verified': False}
 
 
 def write_package(parent: Path, plan: dict, api=None, selected_ids=None, tool_generation: bool = False) -> Path:

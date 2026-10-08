@@ -84,3 +84,54 @@ specification and `tests/test_control.py` for explicit issue/resolve examples.
 Keep Authority and the signing key outside model-accessible tools and files. Define
 actual resource ACL checks and objective-specific verifiers. The database alone is not
 a security boundary. See `docs/MATH.md` and `SECURITY.md` before using it for live actions.
+
+## Persistent workspace protocol
+
+Studio and agents share `Workspace` and the same compiler. Send NDJSON to `python -m bsc bridge`,
+or save one request as JSON and run `python -m bsc workspace --request-file request.json`.
+A request selects a local creator workspace directory (use a disposable directory for tests):
+
+```json
+{"action":"workspace","workspace":"./creator-state","operation":"connect","path":"/path/to/hermes","agreed":true}
+```
+
+The response includes a stable harness `id`. Supported operations:
+
+| Operation | Additional fields | Result |
+| --- | --- | --- |
+| `harnesses` | none | Saved identities, context and snapshot metadata |
+| `switch` | `harness_id` (or null for unbound drafts) | Active workspace |
+| `context` | `harness_id`, `context` | Saved creator context; no native memory write |
+| `projects` | none | Drafts in the active workspace |
+| `create` | none | New draft bound to the active harness |
+| `chat` | `id`, `message` | Tailored draft, declared calls and static report; no installation |
+| `validate` | `id` | Fresh catalog check and revision |
+| `install` | `id`, `fingerprint`, `approved:true` | Revision-bound receipt, without execution |
+
+Use the returned `install_fingerprint` as `fingerprint` only after reviewing that revision and
+its `target`. Do not synthesize approval from model output. Changing the active harness does
+not change the target of `chat`, `validate`, or `install` for an existing project ID.
+This remains a single-user local filesystem interface, not a multi-tenant service.
+
+Plans can include `capability_calls`, for example:
+
+```json
+{"kind":"tool","name":"memory","action":"add","inputs":{"content":"The note supplied by the user."}}
+```
+
+Each entry uses exact catalog names and maps parameter names to sources of values. These are
+instruction declarations, not runtime argument values. Static validation checks the advertised
+action and documented parameters, and flags explicit unsupported calls in prose. Natural-language
+intent, runtime types, authentication and execution outcomes still require harness-side review
+and enforcement. Skill commands extracted from examples can have incomplete contracts.
+
+The local adapter stores a content-addressed snapshot with source, inspection time and
+`live_verified:false`. It never imports the harness's private memory as creator context.
+Only the latest five validation observations for the same snapshot are supplied to the drafter;
+up to forty are retained per workspace. They do not alter the inherited control kernel or its
+reliability scores. User context is sent to the selected drafting provider, so keep it free of secrets.
+
+Existing single-harness connections migrate on first access. Legacy drafts without a stored
+target remain under **Unbound drafts**; they are not silently assigned to the current harness.
+Generated `skills/custom` packages are excluded from future drafting contracts to avoid using
+the creator's own output as proof of additional capability.

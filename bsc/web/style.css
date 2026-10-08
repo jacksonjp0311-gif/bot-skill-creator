@@ -209,9 +209,6 @@ html[data-theme="dark"] body.is-busy .status-dot{animation-name:bsc-status-dark}
 .key-confirmation{margin:2px 0 0;color:#3f2a86;font-weight:650;font-size:13px;line-height:1.4}
 .key-confirmation[hidden]{display:none}
 html[data-theme="dark"] .key-confirmation{color:#d7cbff}
-button.tool-toggle{border-radius:999px;padding:6px 10px}
-button.tool-toggle[aria-pressed="true"]{background:#3f2a86;color:#fff}
-html[data-theme="dark"] button.tool-toggle[aria-pressed="true"]{background:#d7cbff;color:#24182f}
 #tool-file-tab[hidden]{display:none}
 .local-model{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;padding:10px;border-radius:10px;border:1px solid transparent}
 .local-model:hover,.local-model.selected{background:#f4f0ff;border-color:#ddd4f8}
@@ -299,3 +296,5 @@ html[data-theme="dark"] .nexus-tool{fill:#d2b8ea}
 html[data-theme="dark"] .nexus-limit{fill:#b7adc8}
 @media(max-width:900px){.harness-stage{grid-template-columns:1fr;overflow:auto}#nexus-board svg{min-height:220px}.page-actions{margin-top:12px}}
 @media(prefers-reduced-motion:reduce){.scan-ring,.scan-sweep,.scan-orbit,.scan-track i,.nexus-edge,#harness-results{animation:none}.scan-track i{left:0;width:100%}}
+
+#bound-target{margin:0;padding:8px 22px;overflow-wrap:anywhere;font-size:12px;flex:none}#harness-workspace{max-width:100%;margin:8px 0;padding:6px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px}.toolbar{height:auto;min-height:52px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}.toolbar-actions{flex-wrap:wrap}#harness-context{width:100%;min-height:150px}#install-summary{overflow-wrap:anywhere}

@@ -51,3 +51,13 @@ Run the tests from the extracted release, not only the working folder. Run the e
 creator from a path with spaces. Check every relative documentation link. Verify the
 release manifest and original provenance hashes. Inspect screenshots for overflow and
 render model or user strings as text, never trusted HTML.
+
+
+## Harness workspaces
+
+`tests/test_harness_workspaces.py` uses disposable Hermes homes with different contracts.
+It exercises workspace isolation, restart recovery, an in-flight model fixture with a concurrent
+switch, required inputs, invented actions, approval invalidation, CLI/bridge parity and HTTP
+session boundaries. Model fixtures establish wire behavior, not model quality. Manual browser
+verification covers switching, restored drafts and reviewed installation into disposable homes.
+Read-only catalog checks against a local Hermes checkout do not execute its tools.

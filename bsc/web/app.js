@@ -1,7 +1,8 @@
 'use strict';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const state = {token:'', project:null, projects:[], provider:{connected:false}, file:'SKILL.md', busy:false, reviewed:null, providerPick:null, localModels:[], holdLocal:false, savedKeys:[], localSaved:null, pending:'', revealReply:false, toolGeneration:false, harness:{accepted:false}, harnessHomes:[], harnessPick:'', harnessAgreed:'', harnessPrompted:false, untilClose:false, clientId:'', holdingStudio:false};
+const state = {token:'', project:null, projects:[], provider:{connected:false}, file:'SKILL.md', busy:false, reviewed:null, providerPick:null, localModels:[], holdLocal:false, savedKeys:[], localSaved:null, pending:'', phaseLabel:'', revealReply:false, harness:{accepted:false}, harnessHomes:[], harnessPick:'', harnessAgreed:'', harnessPrompted:false, untilClose:false, clientId:'', holdingStudio:false};
+let phaseWatch = 0;
 const PROVIDERS = [
   {id:'openai', name:'ChatGPT', maker:'OpenAI', mark:'GPT', color:'#0f766e', blurb:'Current ChatGPT chat models. The field still accepts an exact model ID.', base:'https://api.openai.com/v1', token:'max_completion_tokens', json:true, local:false, models:[
     'gpt-6-astra','gpt-6.1-sol','gpt-6-sol','gpt-6-luna',
@@ -232,21 +233,11 @@ function renderHarness(reveal) {
     stage.hidden = true;
     again.hidden = true;
     remove.hidden = true;
-    $('#harness-intro').textContent = 'Connect a model, then confirm the Hermes home. The studio reads the map and does not start it.';
+    $('#harness-intro').textContent = 'Confirm the Hermes home for this workspace. The studio reads the map and does not start it.';
     $('#nexus-board').replaceChildren();
     $('#harness-directory').replaceChildren();
     empty.hidden = false;
     empty.replaceChildren();
-    if (!state.provider.connected) {
-      empty.append(node('p', '', 'Connect a drafting model first. Then this studio looks for Hermes and asks you to confirm the folder.'));
-      const button = node('button', 'primary', 'Open API connections');
-      button.type = 'button';
-      button.addEventListener('click', () => view('apis'));
-      empty.append(button);
-      const waiting = $('#privacy-note');
-      if (waiting) waiting.textContent = draftNote();
-      return;
-    }
     empty.append(node('p', '', 'Hermes is waiting for a location. The map is drawn only after you agree and accept.'));
     const button = node('button', 'primary', 'Find Hermes');
     button.type = 'button';
@@ -269,7 +260,7 @@ function renderHarness(reveal) {
   if (note) note.textContent = draftNote();
 }
 async function openHarnessFind() {
-  if (!state.provider.connected || harnessFindBusy) return;
+  if (harnessFindBusy) return;
   harnessFindBusy = true;
   state.harnessPrompted = true;
   state.harnessAgreed = '';
@@ -346,8 +337,10 @@ async function removeHarness() {
   state.harnessPrompted = true;
   state.harnessAgreed = '';
   state.harnessPick = '';
+  await loadHarnessWorkspaces();
+  await restoreHarnessProjects();
   renderHarness(false);
-  toast('Harness removed. The Hermes folder was not changed.');
+  toast('Harness disconnected; its saved workspace is retained. The Hermes folder was not changed.');
 }
 async function acceptHarness() {
   if (!state.harnessAgreed) return;
@@ -361,6 +354,8 @@ async function acceptHarness() {
     stopScan();
     $('#harness-dialog').close();
     view('harness');
+    await loadHarnessWorkspaces();
+    await restoreHarnessProjects();
     renderHarness(true);
   } catch (error) {
     stopScan();
@@ -448,13 +443,35 @@ function openProvider(preset) {
   form.scrollIntoView({block:'nearest', behavior:'smooth'});
 }
 function workingCopy() {
-  return state.toolGeneration?'Building the tool. This can take a few more minutes…':'Working on your skill…';
+  if (state.phaseLabel) return state.phaseLabel;
+  return state.harness && state.harness.accepted ? 'Analyzing harness' : 'Working on your skill…';
 }
-function renderToolToggle() {
-  const button=$('#tool-generation');
-  if(!button) return;
-  button.setAttribute('aria-pressed', state.toolGeneration?'true':'false');
-  button.textContent=state.toolGeneration?'Tool generation on':'Enable tool generation';
+function paintPhase(label) {
+  state.phaseLabel = label || workingCopy();
+  const line = document.querySelector('.message.working .working-line');
+  if (line) {
+    const wave = line.querySelector('.work-wave');
+    line.replaceChildren();
+    if (wave) line.append(wave);
+    line.append(document.createTextNode(state.phaseLabel));
+  }
+  if (state.pending && $('#status-text')) $('#status-text').textContent = state.phaseLabel;
+}
+function watchPhase() {
+  window.clearInterval(phaseWatch);
+  if (!state.harness || !state.harness.accepted || !state.project) return;
+  phaseWatch = window.setInterval(async () => {
+    if (!state.pending) { window.clearInterval(phaseWatch); return; }
+    try {
+      const phase = await api('/api/draft-phase?id=' + encodeURIComponent(state.project.id));
+      if (phase.label && phase.label !== state.phaseLabel) paintPhase(phase.label);
+    } catch (error) {}
+  }, 700);
+}
+function stopPhaseWatch() {
+  window.clearInterval(phaseWatch);
+  phaseWatch = 0;
+  state.phaseLabel = '';
 }
 function messageCard(role, content) {
   const card=node('article',`message ${role}`);
@@ -513,12 +530,10 @@ function renderMessages() {
 }
 function renderProject(project) {
   state.project=project;
-  state.toolGeneration=project.tool_generation===true;
-  renderToolToggle();
-  const toolTab=$('#tool-file-tab');
-  const hasTool=Boolean(project.files?.['tools/run_tool.py']);
-  if(toolTab) toolTab.hidden=!hasTool;
-  if(!hasTool&&state.file==='tools/run_tool.py') state.file='SKILL.md';
+  $('#bound-target').textContent=project.target ? 'Draft target: '+project.target+' · Static inspection; execution unverified' : 'Draft target: unbound';
+  $('#validate-draft').disabled=!project.plan;
+  $('#install-draft').disabled=!project.harness_id||!project.sandbox?.ok||!!project.install?.installed;
+  if(state.file==='tools/run_tool.py') state.file='SKILL.md';
   $('#project-title').textContent=project.plan?.name||'Untitled skill';
   $('#skill-name').textContent=project.plan?.name||'Your next capability';
   $('#skill-desc').textContent=project.plan?.description||'A clear contract. A portable folder.';
@@ -527,8 +542,17 @@ function renderProject(project) {
   $('#api-counter').textContent=project.api?'1':'0';
   const attached=$('#attached-bar');attached.hidden=!project.api;
   attached.textContent=project.api?`⌘ ${project.api.name} · ${project.selected_ids.length} selected operations · Contract only`:'';
-  $('#validation-note').textContent=project.validation?`${project.validation.ok?'✓':'!'} ${project.validation.file_count} files · Static checks ${project.validation.ok?'passed':'failed'} · Not live-tested`:'No draft yet · Nothing has been executed';
+  $('#validation-note').textContent=proofLine(project);
   renderFile();renderMessages();renderAPI();renderStatus();
+}
+function proofLine(project) {
+  if (!project?.validation) return 'No draft yet · Nothing has been executed';
+  const mark = project.validation.ok ? '✓' : '!';
+  const files = `${project.validation.file_count} files`;
+  if (project.sandbox?.ok && project.install?.installed) return `${mark} ${files} · Sandbox passed · Installed at ${project.install.folder}`;
+  if (project.sandbox && project.sandbox.ok === false) return `${mark} ${files} · Sandbox failed · Not installed`;
+  if (project.sandbox?.ok) return `${mark} ${files} · Sandbox passed · Not installed in a harness`;
+  return `${mark} ${files} · Static checks ${project.validation.ok ? 'passed' : 'failed'} · Not live-tested`;
 }
 function renderFile() {
   const content=state.project?.files?.[state.file];
@@ -536,7 +560,7 @@ function renderFile() {
   $$('.file-tabs [data-file]').forEach(x=>{x.classList.toggle('active',x.dataset.file===state.file);x.setAttribute('aria-selected',x.dataset.file===state.file?'true':'false');});
 }
 async function refreshLibrary() {
-  const bootstrap=await api('/api/bootstrap');state.projects=bootstrap.projects;
+  const bootstrap=await api('/api/bootstrap?harness_id='+encodeURIComponent(state.harness?.id||''));state.projects=bootstrap.projects;
   $('#library-counter').textContent=state.projects.filter(p=>p.revision>0).length;
   const recent=$('#recent-projects');recent.replaceChildren();
   state.projects.filter(p=>p.revision>0).slice(0,6).forEach(p=>{
@@ -545,7 +569,7 @@ async function refreshLibrary() {
   });renderLibrary();
 }
 async function openProject(id) {renderProject(await api('/api/project?id='+encodeURIComponent(id)));view('studio');}
-async function createProject() {renderProject(await api('/api/projects',{}));view('studio');await refreshLibrary();$('#message-input').focus();}
+async function createProject() {renderProject(await api('/api/projects',{harness_id:state.harness?.id||null}));view('studio');await refreshLibrary();$('#message-input').focus();}
 function renderLibrary() {
   const grid=$('#library-grid');grid.replaceChildren();
   const projects=state.projects.filter(p=>p.revision>0);
@@ -625,7 +649,7 @@ async function removeSkill(id) {
   if(state.project?.id===id){
     const rest=state.projects.filter(item=>item.id!==id&&item.revision>0);
     if(rest.length) renderProject(await loadSkill(rest[0].id));
-    else renderProject(await api('/api/projects',{}));
+    else renderProject(await api('/api/projects',{harness_id:state.harness?.id||null}));
   }
   await refreshLibrary();
   view('library');
@@ -673,17 +697,21 @@ $('#chat-form').addEventListener('submit',event=>{
   $('#message-input').value='';
   fitComposer();
   state.pending=message;
+  state.phaseLabel=state.harness&&state.harness.accepted?'Analyzing harness':'Working on your skill…';
   renderMessages();
+  watchPhase();
   $('#message-input').focus();
   run(async()=>{
     try {
-      const project=await api('/api/chat',{id:state.project.id,message,tool_generation:state.toolGeneration});
+      const project=await api('/api/chat',{id:state.project.id,message});
+      stopPhaseWatch();
       state.pending='';
       state.revealReply=true;
       renderProject(project);
       state.revealReply=false;
       await refreshLibrary();
     } catch(error) {
+      stopPhaseWatch();
       state.pending='';
       const field=$('#message-input');
       if(!field.value.trim()) {field.value=message; fitComposer();}
@@ -697,11 +725,6 @@ $('#message-input').addEventListener('keydown',event=>{if(event.key==='Enter'&&!
 $$('.starter').forEach(button=>button.addEventListener('click',()=>{$('#message-input').value=button.dataset.prompt;fitComposer();$('#message-input').focus();}));
 $$('[data-view]').forEach(button=>button.addEventListener('click',()=>view(button.dataset.view)));
 $('#new-project').addEventListener('click',()=>run(createProject));
-$('#tool-generation').addEventListener('click',()=>{
-  if(state.busy){toast('Finish the current request before changing this draft.');return;}
-  if(state.toolGeneration){run(async()=>{await setToolGeneration(false);toast('Tool generation is off.');});return;}
-  $('#tool-dialog').showModal();
-});
 $('#harness-dismiss').addEventListener('click',()=>{stopScan();state.harnessPrompted=true;$('#harness-dialog').close();});
 $('#harness-close').addEventListener('click',()=>{stopScan();state.harnessPrompted=true;});
 $('#harness-again').addEventListener('click',()=>openHarnessFind());
@@ -709,17 +732,6 @@ $('#harness-remove').addEventListener('click',()=>run(removeHarness));
 $('#harness-path').addEventListener('input',()=>{$('#harness-agree').disabled=!$('#harness-path').value.trim()&&!state.harnessPick;});
 $('#harness-agree').addEventListener('click',()=>agreeHarness());
 $('#harness-accept').addEventListener('click',()=>acceptHarness());
-$('#tool-cancel').addEventListener('click',()=>$('#tool-dialog').close());
-$('#tool-confirm').addEventListener('click',()=>run(async()=>{
-  $('#tool-dialog').close();
-  const project=await setToolGeneration(true);
-  toast(project.plan?'Tool generation is on. The local tool is in this draft.':'Tool generation is on. The next draft can take a few more minutes.');
-}));
-async function setToolGeneration(enabled) {
-  const project=await api('/api/tool-generation',{id:state.project.id,enabled});
-  renderProject(project);
-  return project;
-}
 $('#composer-api').addEventListener('click',openAPI);$('#import-api-button').addEventListener('click',openAPI);
 $('#api-upload').addEventListener('change',async(event)=>{
   const file=event.target.files[0];if(!file)return;
@@ -936,12 +948,55 @@ function holdStudioOpen() {
 (async()=>{
   try{const data=await api('/api/bootstrap');state.token=data.token;state.untilClose=data.until_close===true;state.projects=data.projects;state.provider=data.provider;state.savedKeys=data.saved_keys||[];state.localSaved=data.local_saved||null;renderProvider();
     holdStudioOpen();
-    if(state.projects.length) await openProject(state.projects[0].id);else renderProject(await api('/api/projects',{}));await refreshLibrary();
+    state.harness=await api('/api/harness');
+    if(state.projects.length) await openProject(state.projects[0].id);else renderProject(await api('/api/projects',{harness_id:state.harness?.id||null}));await refreshLibrary();
     watchLocalModels();
     const startView=new URLSearchParams(location.search).get('view');
     state.harness=await api('/api/harness');
+    await loadHarnessWorkspaces();
     renderHarness(false);
     if(startView==='apis'||startView==='library'||startView==='algorithm'||startView==='harness') view(startView);
     maybeOfferHarness();
   }catch(error){toast(error.message);$('#status-text').textContent='Studio could not load. Open the printed local URL.';}
 })();
+
+async function loadHarnessWorkspaces() {
+  const data=await api('/api/harnesses'); state.harnessWorkspaces=data.harnesses;
+  const select=$('#harness-workspace'); select.replaceChildren();
+  const empty=node('option','','Unbound drafts'); empty.value=''; select.append(empty);
+  for(const h of data.harnesses) {const option=node('option','',h.name+' · '+h.id.slice(0,6));option.value=h.id;select.append(option);}
+  select.value=state.harness?.id||'';
+  $('#edit-harness-context').disabled=!state.harness?.id;
+}
+async function restoreHarnessProjects() {
+  await refreshLibrary();
+  if(state.projects.length) await openProject(state.projects[0].id);
+  else await createProject();
+}
+$('#harness-workspace').addEventListener('change',()=>run(async()=>{
+  state.harness=await api('/api/harness/switch',{id:$('#harness-workspace').value||null});
+  await loadHarnessWorkspaces(); await restoreHarnessProjects(); renderHarness(false);
+}));
+$('#connect-harness').addEventListener('click',()=>openHarnessFind());
+$('#edit-harness-context').addEventListener('click',()=>{
+  const h=state.harnessWorkspaces.find(h=>h.id===$('#harness-workspace').value);
+  if(!h)return; state.contextTarget=h.id; $('#harness-context').value=h.context; $('#harness-context-dialog').showModal();
+});
+$('#save-harness-context').addEventListener('click',()=>run(async()=>{
+  await api('/api/harness/context',{id:state.contextTarget,context:$('#harness-context').value});
+  await loadHarnessWorkspaces(); $('#harness-context-dialog').close(); toast('Harness context saved.');
+}));
+$('#validate-draft').addEventListener('click',()=>run(async()=>{
+  renderProject(await api('/api/validate',{id:state.project.id})); await refreshLibrary();
+}));
+$('#install-draft').addEventListener('click',()=>{
+  const p=state.project;
+  state.installReview={id:p.id,fingerprint:p.install_fingerprint,approved:true};
+  $('#install-summary').textContent=p.plan.name+' · Revision '+p.revision+' · Target: '+p.target+' · Snapshot '+p.snapshot_id;
+  $('#install-dialog').showModal();
+});
+$('#confirm-install').addEventListener('click',()=>run(async()=>{
+  const result=await api('/api/install',state.installReview);
+  if(state.project?.id===result.id)renderProject(result);
+  $('#install-dialog').close(); toast(result.install.installed?'Reviewed skill installed.':result.install.reason);
+}));

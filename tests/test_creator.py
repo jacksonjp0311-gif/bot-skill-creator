@@ -132,27 +132,12 @@ class CompilerTests(unittest.TestCase):
         with zipfile.ZipFile(BytesIO(core.zip_bytes(PLAN['name'], files))) as z:
             self.assertIsNone(z.testzip())
             self.assertEqual(len(z.namelist()), 9)
-    def test_tool_generation_runs_and_refuses_live_actions(self):
-        plain = core.compile_package(PLAN)
-        self.assertNotIn('tools/run_tool.py', plain)
+    def test_package_has_no_generated_local_tool(self):
         files = core.compile_package(PLAN, tool_generation=True)
+        self.assertNotIn('tools/run_tool.py', files)
+        self.assertNotIn('Local tool', files['SKILL.md'].decode())
+        self.assertFalse(json.loads(files['skill.json'])['tool_generation'])
         self.assertTrue(core.validate_files(files)['ok'])
-        self.assertIn('tools/run_tool.py', files)
-        self.assertIn('Local tool', files['SKILL.md'].decode())
-        self.assertTrue(json.loads(files['skill.json'])['tool_generation'])
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            script = root / 'run_tool.py'
-            script.write_bytes(files['tools/run_tool.py'])
-            missing = subprocess.run([sys.executable, str(script)], input='{}', capture_output=True, text=True)
-            self.assertEqual(missing.returncode, 0, missing.stderr)
-            self.assertEqual(json.loads(missing.stdout)['outcome'], 'NEEDS_INPUT')
-            supplied = {'inputs': {item: 'sample' for item in PLAN['inputs']}}
-            ready = subprocess.run([sys.executable, str(script)], input=json.dumps(supplied), capture_output=True, text=True)
-            self.assertEqual(json.loads(ready.stdout)['outcome'], 'DRAFT')
-            self.assertFalse(json.loads(ready.stdout)['network'])
-            refused = subprocess.run([sys.executable, str(script)], input=json.dumps({'requested_effect': 'send mail', 'inputs': supplied['inputs']}), capture_output=True, text=True)
-            self.assertEqual(json.loads(refused.stdout)['outcome'], 'REFUSED')
     def test_symlink_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d);(root/'file').write_text('hi')
@@ -218,15 +203,11 @@ class WorkspaceTests(unittest.TestCase):
         p=self.draft(); first=self.ws.export(p['id'],p['export_fingerprint'])
         restarted=Workspace(Path(self.tmp.name))
         self.assertEqual(first, restarted.export(p['id'],p['export_fingerprint']))
-    def test_chat_saves_tool_generation_and_can_turn_it_off(self):
+    def test_chat_ignores_a_request_to_generate_a_local_tool(self):
         drafted = self.ws.chat(self.project['id'], 'Create a skill that summarizes three pasted notes.', tool_generation=True)
-        self.assertTrue(drafted['tool_generation'])
-        self.assertIn('tools/run_tool.py', drafted['files'])
+        self.assertFalse(drafted['tool_generation'])
+        self.assertNotIn('tools/run_tool.py', drafted['files'])
         self.assertTrue(drafted['validation']['ok'])
-        quiet = self.ws.set_tool_generation(drafted['id'], False)
-        self.assertFalse(quiet['tool_generation'])
-        self.assertNotIn('tools/run_tool.py', quiet['files'])
-        self.assertTrue(quiet['validation']['ok'])
     def test_model_key_not_saved(self):
         self.ws.configure_provider({'base_url':'http://127.0.0.1:1234/v1','model':'test','api_key':'test-private-secret','local':True})
         self.assertNotIn('api_key', self.ws.provider_info())

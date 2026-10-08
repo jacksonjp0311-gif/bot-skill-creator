@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-08 · Harness workspace verification
+
+- Persist separate harness identities, capability snapshots, creator context and validation feedback.
+- Bind drafts to their original harness across switches and restarts.
+- Require explicit revision-bound installation; reject stale snapshots, unknown actions and missing inputs.
+- Expose the shared workspace workflow through studio, CLI and NDJSON.
+- Narrow template routing to requested capabilities and exclude forbidden actions and unrelated tools.
+- Keep static checks distinct from live execution evidence.
+
 ## 0.1.0 · 2026-10-06
 
 Initial local release of Bot Skill Creator.
@@ -20,7 +29,9 @@ Initial local release of Bot Skill Creator.
 - ChatGPT lists the current chat models. While offline, the studio keeps looking for Ollama and fills the endpoint when one model answers. Fetch checks immediately.
 - Save key seals a remote provider key outside the app for the next session. Ollama needs no key and confirms that its model choice was saved. Other local servers are not selected.
 - Sending a chat message shows it immediately, then a working line until the draft returns. A stopped request keeps the status and puts the unsent text back.
-- Enable tool generation adds a local Python tool to the skill. Turning it on explains that the next draft can take a few more minutes. The tool checks inputs on this machine and does not call imported APIs.
+- An accepted harness teaches the drafter each tool's purpose, actions, and required inputs, and each skill's one-line summary. The model writes the skill for that application. Cleanup does not invent the procedure.
+- A draft is woven into the skills that already do the job. The model receives their documented commands and required inputs, rewrites the procedure once if those calls are missing, and the sandbox refuses a package that only names a skill.
+- Each draft rereads that harness's memory and nexus first. The working line says Analyzing harness, then the studio writes the skill, checks the package in a sandbox, and offers a reviewed install under skills/custom. An existing skill is not overwritten, and the skill is not run.
 - While a draft is running, the chat shows an orbit, a wave, and a traveling light beside the working line.
 - The README opens with light-mode and dark-mode pictures of an empty studio. No personal drafts or keys are part of the repository.
 - Saved keys can be opened again on macOS and Linux. The portable seal header is read at its real length.

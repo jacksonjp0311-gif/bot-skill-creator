@@ -95,6 +95,31 @@ Both interfaces call the **same compiler**. No browser-only export format or sep
 agent-only fork exists. Generated packages use `SKILL.md` plus supporting reference and
 script files; a particular harness still controls discovery, invocation and permissions.
 
+## Learn a harness and tailor a skill
+
+Choose **Connect Hermes**, confirm its local folder, then select it under **Harness workspace**.
+Each connection retains its own capability snapshot, creator context, drafts, and validation
+history. **Harness context** records your conventions for that environment; it does not edit
+Hermes memory. New drafts bind to the selected harness. Switching workspaces never retargets
+an existing draft, and returning restores its own draft list.
+
+The creator inspects supported local tool schemas and documented skill commands again before
+writing. It passes relevant capabilities, saved context, and recent validation feedback to the
+drafting model. Offline templates also name inspected actions and required input sources.
+The model gets one bounded correction opportunity when validation finds a mismatch.
+
+Chat only creates a draft. Use **Validate**, inspect the files, then **Review install** to approve
+the exact revision and target. Changed capabilities or edits invalidate the approval. Unknown
+actions and missing required inputs block installation and harness-bound export. Existing skills
+are never overwritten. CLI/NDJSON users can use the same persistent workflow; see
+[the workspace protocol](docs/HARNESS.md#persistent-workspace-protocol).
+
+“Learning” here means persistent inspection and scoped drafting feedback, not model training.
+The current adapter inspects local Hermes files; it does not prove that a running profile has
+those tools enabled or authenticated. Static package checks do not execute the skill, validate
+all natural-language meaning, or establish live success. Unsupported dynamic contracts remain
+unavailable instead of receiving invented actions. No business API is executed.
+
 ## Create your first skill
 
 Open **Add an API → Use example API** to try a fictional warehouse contract. Select

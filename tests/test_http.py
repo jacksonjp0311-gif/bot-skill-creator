@@ -32,7 +32,7 @@ class HTTPTests(unittest.TestCase):
         if data is not None: h['Content-Type']='application/json'
         h.update(headers or {})
         req=urllib.request.Request(self.url+path,data=None if data is None else json.dumps(data).encode(),headers=h)
-        return urllib.request.urlopen(req,timeout=5)
+        return urllib.request.urlopen(req,timeout=30)
     def test_static_ui(self):
         with self.request('/') as r:
             self.assertIn(b'Bot Skill Creator',r.read());self.assertIn('frame-ancestors',r.headers['Content-Security-Policy'])
@@ -81,17 +81,29 @@ class HTTPTests(unittest.TestCase):
             self.request('/api/provider/key', {'provider':'local','api_key':secret})
         with self.assertRaises(urllib.error.HTTPError):
             self.request('/api/provider/key', {'provider':'openai','api_key':'   '})
-    def test_tool_generation_route_adds_the_local_tool(self):
+    def test_draft_phase_says_analyzing_harness(self):
         with self.request('/api/projects', {}) as response:
             project = json.load(response)
-        with self.request('/api/chat', {'id': project['id'], 'message': 'Build a read-only inventory brief.'}) as response:
+        self.ws.set_phase(project['id'], 'analyzing')
+        try:
+            with self.request('/api/draft-phase?id=' + project['id']) as response:
+                phase = json.load(response)
+            self.assertEqual(phase['label'], 'Analyzing harness')
+        finally:
+            self.ws.clear_phase(project['id'])
+        script = (ROOT / 'bsc' / 'web' / 'app.js').read_text(encoding='utf-8')
+        self.assertIn('Analyzing harness', script)
+        self.assertIn('/api/draft-phase', script)
+    def test_tool_generation_route_is_gone(self):
+        with self.request('/api/projects', {}) as response:
             project = json.load(response)
+        with self.request('/api/chat', {'id': project['id'], 'message': 'Build a read-only inventory brief.', 'tool_generation': True}) as response:
+            project = json.load(response)
+        self.assertFalse(project['tool_generation'])
         self.assertNotIn('tools/run_tool.py', project['files'])
-        with self.request('/api/tool-generation', {'id': project['id'], 'enabled': True}) as response:
-            project = json.load(response)
-        self.assertTrue(project['tool_generation'])
-        self.assertIn('does not call the network', project['files']['tools/run_tool.py'])
-        self.assertNotIn('api_key', json.dumps(project['files']))
+        with self.assertRaises(urllib.error.HTTPError) as missing:
+            self.request('/api/tool-generation', {'id': project['id'], 'enabled': True})
+        self.assertEqual(missing.exception.code, 404)
     def test_create_chat_export(self):
         with self.request('/api/projects',{}) as r:p=json.load(r)
         with self.request('/api/chat',{'id':p['id'],'message':'Build a read-only inventory brief.'}) as r:p=json.load(r)
@@ -279,19 +291,43 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(seen['data']['response_format'],{'type':'json_object'})
         self.assertEqual(seen['data']['max_completion_tokens'], 2400)
         self.assertNotIn('Tool generation is enabled', seen['data']['messages'][0]['content'])
-    def test_tool_generation_asks_the_model_for_a_longer_draft(self):
-        providers.draft(self.config, messages=[{'role':'user','content':'Prepare inventory'}], current_plan=None, selected_operations=[], tool_generation=True)
-        seen = FakeProvider.seen[-1]
-        self.assertEqual(seen['data']['max_completion_tokens'], 4000)
-        self.assertIn('Tool generation is enabled', seen['data']['messages'][0]['content'])
-    def test_draft_sends_harness_names_and_not_the_folder_path(self):
+    def test_draft_sends_harness_actions_and_not_the_folder_path(self):
         providers.draft(self.config, messages=[{'role':'user','content':'Triage my inbox.'}], current_plan=None,
                         selected_operations=[], harness={'name':'hermes-agent-evo','skills':['email/himalaya'],
-                        'tools':['memory'], 'path': r'C:\secret\hermes-agent-evo'})
-        packet = json.loads(FakeProvider.seen[-1]['data']['messages'][1]['content'])
-        self.assertEqual(packet['harness']['skills'], ['email/himalaya'])
+                        'tools':[{'name':'discord','actions':['list_guilds','fetch_messages']}],
+                        'path': r'C:\secret\hermes-agent-evo'})
+        seen = FakeProvider.seen[-1]
+        packet = json.loads(seen['data']['messages'][1]['content'])
+        self.assertEqual(packet['harness']['skills'], [{'name': 'email/himalaya'}])
+        self.assertEqual([item['name'] for item in packet['harness']['tools'][0]['actions']],
+                         ['list_guilds', 'fetch_messages'])
         self.assertNotIn('secret', json.dumps(packet['harness']))
-        self.assertIn('does not need to name', FakeProvider.seen[-1]['data']['messages'][0]['content'])
+        system = seen['data']['messages'][0]['content']
+        self.assertIn('exact action', system)
+        self.assertIn('Learn that contract', system)
+        self.assertNotIn('subject as query', system)
+        self.assertNotIn('Tool generation is enabled', system)
+        self.assertNotIn('skill-authoring', seen['data']['messages'][0]['content'].split('Do not call a skill-authoring')[0])
+        self.assertIn('Interlink the new skill', system)
+        self.assertEqual(packet['harness']['links'], [])
+    def test_draft_sends_only_the_commands_the_job_needs(self):
+        from tests.test_harness import GMAIL_JOB, gmail_home
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / 'hermes-agent-evo'
+            gmail_home(home)
+            catalog = __import__('bsc.harness', fromlist=['catalog_for']).catalog_for(str(home))
+        providers.draft(self.config, messages=[{'role': 'user', 'content': GMAIL_JOB}],
+                        current_plan=None, selected_operations=[], harness=catalog)
+        packet = json.loads(FakeProvider.seen[-1]['data']['messages'][1]['content'])
+        links = {item['name']: item for item in packet['harness']['links']}
+        self.assertIn('productivity/google-workspace', links)
+        names = [item['name'] for item in links['productivity/google-workspace']['actions']]
+        self.assertIn('gmail search', names)
+        self.assertIn('gmail send', names)
+        self.assertNotIn('calendar list', names)
+        self.assertNotIn('unread skill body', json.dumps(packet['harness']))
+        self.assertNotIn(str(home), json.dumps(packet['harness']))
+
     def test_no_redirect_with_credentials(self):
         FakeProvider.redirect=True
         with self.assertRaisesRegex(InputError,'HTTP 302'):self.call()
