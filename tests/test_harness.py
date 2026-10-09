@@ -5,7 +5,11 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-from bsc.core import bind_harness, interlink_gaps, sandbox_package
+from bsc import providers
+from bsc.core import (
+    bind_harness, conversation_job, fresh_questions, interlink_gaps, linked_skills,
+    sandbox_package, unresolved_questions,
+)
 from bsc.harness import accept_path, catalog_for, find_homes
 from bsc.keystore import Keystore
 from bsc.security import InputError
@@ -317,19 +321,19 @@ class HarnessTests(unittest.TestCase):
             project = ws.create()
             drafted = ws.chat(project['id'], 'Save a note with the memory tool.')
             self.assertTrue(drafted['sandbox']['ok'])
-            self.assertFalse(drafted['install']['installed'])
-            drafted = ws.install(drafted['id'], drafted['install_fingerprint'], True)
             self.assertTrue(drafted['install']['installed'])
             self.assertEqual(drafted['install']['folder'], 'skills/custom/' + drafted['plan']['name'])
+            self.assertTrue(drafted['install']['url'].startswith('file:'))
             installed = home / 'skills' / 'custom' / drafted['plan']['name'] / 'SKILL.md'
             self.assertTrue(installed.is_file())
             self.assertTrue((home / 'skills' / 'demo' / 'SKILL.md').is_file())
-            self.assertIn('Sandbox passed', drafted['messages'][-1]['content'])
+            self.assertIn('It fits your harness, and it is installed.', drafted['messages'][-1]['content'])
+            self.assertIn(drafted['install']['url'], drafted['messages'][-1]['content'])
             self.assertEqual(drafted['install']['harness_id'], drafted['harness_id'])
             again = ws.chat(project['id'], 'Keep the same note skill.')
-            again = ws.install(again['id'], again['install_fingerprint'], True)
             self.assertFalse(again['install']['installed'])
             self.assertIn('not overwritten', again['install']['reason'])
+            self.assertIn(again['install']['url'], again['messages'][-1]['content'])
             self.assertEqual(len(list((home / 'skills' / 'custom').iterdir())), 1)
 
     def test_sandbox_rejects_a_tool_the_harness_does_not_have(self):
@@ -373,6 +377,8 @@ $GAPI gmail labels
 $GAPI gmail modify MESSAGE_ID --add-labels LABEL_ID
 $GAPI gmail modify MESSAGE_ID --remove-labels UNREAD
 $GAPI calendar list
+$GAPI calendar create --summary "Team Standup" --start 2026-03-01T10:00:00Z --end 2026-03-01T10:30:00Z
+$GAPI calendar delete EVENT_ID
 ```
 '''
 
@@ -461,15 +467,16 @@ class HarnessLinkTests(unittest.TestCase):
             ws.accept_harness(str(home), True)
             drafted = ws.chat(ws.create()['id'], GMAIL_JOB)
             self.assertTrue(drafted['sandbox']['ok'], drafted['sandbox'])
-            self.assertFalse(drafted['install']['installed'])
-            drafted = ws.install(drafted['id'], drafted['install_fingerprint'], True)
             self.assertTrue(drafted['install']['installed'])
+            self.assertTrue(drafted['install']['url'].startswith('file:'))
             body = json.dumps(drafted['plan'])
             for action in ('gmail search', 'gmail get', 'gmail send', 'gmail reply', 'gmail labels', 'gmail modify'):
                 self.assertIn(action, body)
             self.assertIn('email/email-inbox-triage', body)
             self.assertIn('productivity/google-workspace', body)
             self.assertNotIn('calendar list', body)
+            self.assertNotIn('calendar create', body)
+            self.assertNotIn('calendar delete', body)
             self.assertNotIn('himalaya envelope', body)
             self.assertNotIn('himalaya message', body)
             self.assertIn('MESSAGE_ID', body)
@@ -554,6 +561,277 @@ class HarnessLinkTests(unittest.TestCase):
             self.assertTrue(drafted['sandbox']['ok'], drafted['sandbox'])
             self.assertIn('gmail search', json.dumps(drafted['plan']))
             self.assertIn('gmail reply', json.dumps(drafted['plan']))
+
+    def test_write_a_bot_skill_does_not_turn_listing_into_create(self):
+        job = 'Write a bot skill for my calendar. List the events between two times I give you.'
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as secrets:
+            home = Path(tmp) / 'hermes-agent-evo'
+            gmail_home(home)
+            ws = Workspace(Path(tmp) / 'studio', Keystore(Path(secrets)))
+            ws.accept_harness(str(home), True)
+            drafted = ws.chat(ws.create()['id'], job)
+            body = json.dumps(drafted['plan'])
+            self.assertIn('calendar list', body)
+            self.assertNotIn('calendar create', body)
+            self.assertNotIn('calendar delete', body)
+            self.assertTrue(drafted['sandbox']['ok'], drafted['sandbox'])
+            self.assertFalse(drafted['clarification']['pending'])
+            self.assertTrue(drafted['install']['installed'])
+            note = drafted['messages'][-1]['content']
+            self.assertIn('It fits your harness, and it is installed.', note)
+            self.assertIn(drafted['install']['url'], note)
+            self.assertNotIn('calendar create', note)
+
+    def test_a_question_opens_a_box_and_the_answer_continues(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as secrets:
+            home = Path(tmp) / 'hermes-agent-evo'
+            gmail_home(home)
+            (home / 'tools' / 'memory_tool.py').write_text(
+                '_STORE_ACTIONS = {"add": None, "replace": None, "remove": None}\n', encoding='utf-8')
+            ws = Workspace(Path(tmp) / 'studio', Keystore(Path(secrets)))
+            ws.accept_harness(str(home), True)
+            ws.provider = {'api_key': '', 'model': 'fixture-model', 'local': True}
+            asking = {
+                'name': 'list-calendar-events-in-range',
+                'description': 'List calendar events between two times.',
+                'goal': 'Show the events in the range.',
+                'inputs': ['Start', 'End'],
+                'steps': ['Call productivity/google-workspace action calendar list with --start and --end.'],
+                'success_criteria': ['The events in the range are shown.'],
+                'constraints': ['Leave the calendar unchanged.'],
+                'questions': [{'question': 'Which calendar should I read?', 'choices': ['Work', 'Home']}],
+                'reply': 'I can do this. One question first.',
+            }
+            done = dict(asking)
+            done.pop('questions')
+            done['reply'] = 'Here is your calendar skill.'
+            done['capability_calls'] = [{
+                'kind': 'skill', 'name': 'productivity/google-workspace', 'action': 'calendar list',
+                'inputs': {},
+            }]
+
+            def fake_draft(config, *, messages, current_plan, selected_operations, harness=None, missing_links=None):
+                del config, current_plan, selected_operations, harness, missing_links
+                last = messages[-1]['content']
+                return done if 'Work' in last else asking
+
+            original = providers.draft
+            providers.draft = fake_draft
+            try:
+                project = ws.create()
+                paused = ws.chat(project['id'], 'Write a bot skill for my calendar. List the events between two times I give you.')
+                self.assertTrue(paused['clarification']['pending'])
+                self.assertEqual(paused['clarification']['questions'][0]['question'], 'Which calendar should I read?')
+                self.assertEqual(paused['clarification']['questions'][0]['choices'][0], 'Work')
+                self.assertTrue(paused['sandbox']['pending_clarification'])
+                self.assertIn('Answer in the box', paused['messages'][-1]['content'])
+                self.assertNotIn('I paused before installing', paused['messages'][-1]['content'])
+                finished = ws.chat(project['id'], 'Which calendar should I read? — Work')
+            finally:
+                providers.draft = original
+            self.assertFalse(finished['clarification']['pending'])
+            self.assertTrue(finished['sandbox']['ok'], finished['sandbox'])
+            self.assertTrue(finished['install']['installed'])
+            self.assertIn('calendar list', json.dumps(finished['plan']))
+            self.assertIn('It fits your harness, and it is installed.', finished['messages'][-1]['content'])
+            self.assertIn(finished['install']['url'], finished['messages'][-1]['content'])
+
+    def test_an_answer_keeps_the_original_list_job(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as secrets:
+            home = Path(tmp) / 'hermes-agent-evo'
+            gmail_home(home)
+            ws = Workspace(Path(tmp) / 'studio', Keystore(Path(secrets)))
+            ws.accept_harness(str(home), True)
+            ws.provider = {'api_key': '', 'model': 'fixture-model', 'local': True}
+            asking = {
+                'name': 'calendar-events-between-times',
+                'description': 'List events between two times.',
+                'goal': 'Show the user calendar events between their supplied start and end times.',
+                'inputs': ['Start', 'End'],
+                'steps': ['Use productivity/google-workspace — calendar list with --start and --end.'],
+                'success_criteria': ['The events in the range are shown.'],
+                'constraints': ['Read-only: do not create, edit, or delete events.'],
+                'questions': [{'question': 'What timezone should the calendar range use if the times you provide don’t include one?',
+                               'choices': ['Your calendar’s timezone']}],
+                'reply': 'One question first.',
+            }
+            done = dict(asking)
+            done.pop('questions')
+            done['reply'] = 'Ready for a human review.'
+
+            def fake_draft(config, *, messages, current_plan, selected_operations, harness=None, missing_links=None):
+                del config, current_plan, selected_operations, harness, missing_links
+                return done if 'timezone' in messages[-1]['content'].lower() else asking
+
+            original = providers.draft
+            providers.draft = fake_draft
+            try:
+                project = ws.create()
+                paused = ws.chat(project['id'], 'Write a bot skill for my calendar. List the events between two times I give you.')
+                self.assertTrue(paused['clarification']['pending'])
+                finished = ws.chat(project['id'], 'Here you go:\nWhat timezone should the calendar range use if the times you provide don’t include one? — Your calendar’s timezone')
+            finally:
+                providers.draft = original
+            self.assertTrue(finished['sandbox']['ok'], finished['sandbox'])
+            self.assertNotIn('calendar create', ' '.join(finished['sandbox'].get('errors') or []))
+            self.assertNotIn('calendar delete', ' '.join(finished['sandbox'].get('errors') or []))
+            self.assertTrue(finished['install']['installed'])
+            note = finished['messages'][-1]['content']
+            self.assertIn('This skill shows you calendar events between the start and end times.', note)
+            from bsc.workspace import _skill_summary
+            drive_line = _skill_summary({
+                'goal': "Find relevant Drive files for the user's search query and report the matching results.",
+                'constraints': ['Use Drive search only; do not create, edit, move, share, or delete files.'],
+            })
+            self.assertEqual(
+                drive_line,
+                'This skill finds relevant Drive files for your search query and reports the matching results. '
+                'It only uses Drive search. It does not create, edit, move, share, or delete files.')
+            self.assertNotIn("you's", drive_line)
+            self.assertIn('It does not create, edit, or delete events.', note)
+            self.assertIn(finished['install']['url'], note)
+
+    def test_a_repeated_question_stays_closed(self):
+        from bsc.workspace import _skill_summary
+        messages = [
+            {'role': 'user', 'content': 'Write a bot skill for my Docs.'},
+            {'role': 'user', 'content': 'Here you go:\nWhich docs action should this skill use? — docs create'},
+            {'role': 'user', 'content': 'Here you go:\nWhat title should the new Google Doc use? — Ask the user for a title before creating the document'},
+        ]
+        repeated = [{'question': 'What title should the new Google Doc use?', 'choices': ['Ask the user']}]
+        self.assertEqual(fresh_questions(repeated, messages), [])
+        different = [{'question': 'Which folder should hold the document?', 'choices': ['My Drive']}]
+        self.assertEqual(fresh_questions(different, messages), different)
+        line = _skill_summary({
+            'goal': "Create one Google Doc using the user's title and optional body.",
+            'description': 'Create one Google Doc when the user asks for a new document. Ask for a title if it is missing, and include a body only when the user provides one.',
+            'constraints': ['Create only one document per request.'],
+        })
+        self.assertEqual(
+            line,
+            'This skill creates one Google Doc using your title and optional body. '
+            'It asks for a title when that is missing. It creates only one document per request.')
+
+    def test_an_answered_question_finishes_the_skill(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as secrets:
+            home = Path(tmp) / 'hermes-agent-evo'
+            gmail_home(home)
+            ws = Workspace(Path(tmp) / 'studio', Keystore(Path(secrets)))
+            ws.accept_harness(str(home), True)
+            ws.provider = {'api_key': '', 'model': 'fixture-model', 'local': True}
+            asking = {
+                'name': 'calendar-events-between-times',
+                'description': 'List events between two times.',
+                'goal': 'Show the user calendar events between their supplied start and end times.',
+                'inputs': ['Start', 'End'],
+                'steps': ['Use productivity/google-workspace — calendar list with --start and --end.'],
+                'success_criteria': ['The events in the range are shown.'],
+                'constraints': ['Read-only: do not create, edit, or delete events.'],
+                'questions': [{'question': 'What title should the new Google Doc use?', 'choices': ['Ask the user']}],
+                'reply': 'One question first.',
+            }
+            done = dict(asking)
+            done.pop('questions')
+            done['reply'] = 'Ready for a human review.'
+            calls = []
+
+            def fake_draft(config, *, messages, current_plan, selected_operations, harness=None, missing_links=None):
+                del config, messages, current_plan, selected_operations, harness
+                calls.append(list(missing_links or []))
+                return done if missing_links else asking
+
+            original = providers.draft
+            providers.draft = fake_draft
+            try:
+                project = ws.create()
+                paused = ws.chat(project['id'], 'Write a bot skill for my calendar. List the events between two times I give you.')
+                self.assertTrue(paused['clarification']['pending'])
+                finished = ws.chat(
+                    project['id'],
+                    'Here you go:\nWhat title should the new Google Doc use? — Ask the user for a title before creating the document')
+            finally:
+                providers.draft = original
+            self.assertTrue(any('already answered' in item for item in calls[-1]))
+            self.assertFalse(finished['clarification']['pending'])
+            self.assertTrue(finished['sandbox']['ok'], finished['sandbox'])
+            self.assertTrue(finished['install']['installed'])
+            note = finished['messages'][-1]['content']
+            self.assertNotIn('Answer in the box', note)
+            self.assertIn('This skill shows you calendar events between the start and end times.', note)
+            self.assertIn(finished['install']['url'], note)
+
+    def test_an_unresolved_action_asks_before_install(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as secrets:
+            home = Path(tmp) / 'hermes-agent-evo'
+            gmail_home(home)
+            ws = Workspace(Path(tmp) / 'studio', Keystore(Path(secrets)))
+            ws.accept_harness(str(home), True)
+            drafted = ws.chat(ws.create()['id'], 'Write a bot skill for my calendar.')
+            self.assertTrue(drafted['clarification']['pending'])
+            self.assertEqual(drafted['clarification']['questions'][0]['choices'][0], 'calendar list')
+            self.assertIn('calendar create', drafted['clarification']['questions'][0]['choices'])
+            self.assertFalse(drafted['install']['installed'])
+            self.assertFalse((home / 'skills' / 'custom').exists())
+
+    def test_commands_after_the_sixteenth_stay_available(self):
+        lines = [
+            '---',
+            'name: google-workspace',
+            'description: "Gmail, Calendar, Drive, Docs, Sheets via gws CLI or Python."',
+            '---',
+            '',
+            '```bash',
+        ]
+        lines.extend(f'$GAPI lane{index:02d} list ITEM' for index in range(1, 17))
+        lines.extend([
+            '$GAPI sheets get SHEET_ID "Sheet1!A1:D10"',
+            '$GAPI sheets create --title "Budget"',
+            '$GAPI sheets update SHEET_ID RANGE --values "1,2"',
+            '$GAPI sheets append SHEET_ID RANGE --values "3,4"',
+            '```',
+            '',
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / 'hermes-agent-evo'
+            path = home / 'skills' / 'productivity' / 'google-workspace' / 'SKILL.md'
+            path.parent.mkdir(parents=True)
+            path.write_text('\n'.join(lines), encoding='utf-8')
+            (home / 'SOUL.md').write_text('soul\n', encoding='utf-8')
+            (home / 'tools').mkdir()
+            (home / 'tools' / 'memory_tool.py').write_text('print(1)\n', encoding='utf-8')
+            catalog = catalog_for(str(home))
+            contract = next(item for item in catalog['skill_contracts'] if item['name'] == 'productivity/google-workspace')
+            actions = {item['name']: item for item in contract['actions']}
+            self.assertIn('sheets get', actions)
+            self.assertIn('SHEET_ID', actions['sheets get']['requires'])
+            self.assertGreater(len(actions), 16)
+            questions = unresolved_questions('Write a bot skill for my Sheets.', catalog)
+            self.assertEqual(questions[0]['question'], 'Which sheets action should this skill use?')
+            self.assertEqual(questions[0]['choices'][0], 'sheets get')
+            self.assertIn('sheets create', questions[0]['choices'])
+            job = conversation_job([
+                {'role': 'user', 'content': 'Write a bot skill for my Sheets.'},
+                {'role': 'user', 'content': 'Here you go:\nWhich sheets action should this skill use? — sheets get'},
+            ])
+            self.assertEqual(unresolved_questions(job, catalog), [])
+            links = linked_skills(job, catalog)
+            self.assertEqual(links[0]['name'], 'productivity/google-workspace')
+            self.assertEqual([item['name'] for item in links[0]['actions']], ['sheets get'])
+
+    def test_one_summary_word_does_not_require_the_skill_by_name(self):
+        catalog = {
+            'name': 'hermes',
+            'skills': ['productivity/google-workspace'],
+            'tools': [],
+            'skill_contracts': [{
+                'name': 'productivity/google-workspace',
+                'summary': 'Gmail, Calendar, Drive, Docs, Sheets via gws CLI or Python.',
+                'related': [],
+                'actions': [{'name': 'gmail search', 'requires': ['query'], 'kind': 'command'}],
+            }],
+        }
+        self.assertEqual(linked_skills('Write a bot skill for my Sheets.', catalog), [])
+        self.assertEqual(unresolved_questions('Write a bot skill for my Sheets.', catalog), [])
 
 
 class HarnessHTTPTests(unittest.TestCase):

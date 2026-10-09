@@ -31,6 +31,12 @@ Initial local release of Bot Skill Creator.
 - Sending a chat message shows it immediately, then a working line until the draft returns. A stopped request keeps the status and puts the unsent text back.
 - An accepted harness teaches the drafter each tool's purpose, actions, and required inputs, and each skill's one-line summary. The model writes the skill for that application. Cleanup does not invent the procedure.
 - A draft is woven into the skills that already do the job. The model receives their documented commands and required inputs, rewrites the procedure once if those calls are missing, and the sandbox refuses a package that only names a skill.
+- GPT-5, GPT-6, and o-series drafts ask for no reasoning effort, so the reply is the skill plan. An empty plan caused by the reply limit is requested once more with a larger limit.
+- The sandbox treats prose as a harness call only when it names a catalog tool, skill, action, or a path-shaped identifier. Ordinary English after the word call is left alone.
+- "Write a bot skill" is the request, so those words do not add a create, send, or delete command. A draft that needs one decision asks in a box, then continues. Replies stay short and warm.
+- A follow-up answer keeps the original job, so naming a product without a verb asks which action to use instead of requiring every command. When the harness check passes, the skill is installed and the reply says what it will do, with a link to the folder. An existing skill is not overwritten.
+- A skill keeps its later documented commands, and one product word in a summary counts once. A Sheets job can ask which Sheets action to use.
+- An answered question stays closed. If the answer says to ask during the job, the skill calls clarify and finishes. The closing line says what the skill does, including a fact it asks for while it runs.
 - Each draft rereads that harness's memory and nexus first. The working line says Analyzing harness, then the studio writes the skill, checks the package in a sandbox, and offers a reviewed install under skills/custom. An existing skill is not overwritten, and the skill is not run.
 - While a draft is running, the chat shows an orbit, a wave, and a traveling light beside the working line.
 - The README opens with light-mode and dark-mode pictures of an empty studio. No personal drafts or keys are part of the repository.

@@ -94,6 +94,12 @@ class HTTPTests(unittest.TestCase):
         script = (ROOT / 'bsc' / 'web' / 'app.js').read_text(encoding='utf-8')
         self.assertIn('Analyzing harness', script)
         self.assertIn('/api/draft-phase', script)
+        self.assertIn('clarify-dialog', (ROOT / 'bsc' / 'web' / 'index.html').read_text(encoding='utf-8'))
+        self.assertIn('openClarify', script)
+        self.assertIn('clarify-ask', script)
+        self.assertIn('clarify-choice-copy', script)
+        self.assertIn('skill-link', script)
+        self.assertIn('/api/open-skill', (ROOT / 'bsc' / 'server.py').read_text(encoding='utf-8'))
     def test_tool_generation_route_is_gone(self):
         with self.request('/api/projects', {}) as response:
             project = json.load(response)
@@ -290,7 +296,17 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn('fixture-secret',json.dumps(seen['data']))
         self.assertEqual(seen['data']['response_format'],{'type':'json_object'})
         self.assertEqual(seen['data']['max_completion_tokens'], 2400)
+        self.assertNotIn('reasoning_effort', seen['data'])
         self.assertNotIn('Tool generation is enabled', seen['data']['messages'][0]['content'])
+    def test_gpt6_reserves_the_reply_for_the_skill_plan(self):
+        cfg = {'model': 'gpt-6-luna', 'token_field': 'max_completion_tokens', 'local': False, 'json_mode': True}
+        payload = providers.completion_payload(cfg, 'system', {'conversation': []})
+        self.assertEqual(payload['reasoning_effort'], 'none')
+        self.assertEqual(payload['max_completion_tokens'], 2400)
+        self.assertFalse(providers.limits_reasoning(
+            {'model': 'fixture-model', 'token_field': 'max_completion_tokens', 'local': True}))
+        with self.assertRaises(providers._ReplyBudget):
+            providers._plan_from_response({'choices': [{'finish_reason': 'length', 'message': {'content': ''}}]})
     def test_draft_sends_harness_actions_and_not_the_folder_path(self):
         providers.draft(self.config, messages=[{'role':'user','content':'Triage my inbox.'}], current_plan=None,
                         selected_operations=[], harness={'name':'hermes-agent-evo','skills':['email/himalaya'],

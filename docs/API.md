@@ -24,12 +24,15 @@ The app does not have OS-level memory protection against local administrator acc
 The adapter POSTs to `<base_url>/chat/completions`. Choose the token field your provider
 supports (`max_completion_tokens` or `max_tokens`), and disable JSON-object mode only
 when the provider lacks that parameter. The returned text still must parse as a valid
-plan JSON object. Tool execution, reasoning-provider-specific fields, native Anthropic
-Messages, native Gemini endpoints and multimodal attachments are not implemented.
+plan JSON object. Native Anthropic Messages, native Gemini endpoints, and multimodal
+attachments are not implemented. A remote GPT-5, GPT-6, or o-series model is asked
+for `reasoning_effort: none` so the reply budget is used for the skill plan. If that
+field is rejected, the same request is sent once without it. If the model still
+returns an empty plan because the reply limit was spent, one larger request is made.
 
-Configuration is not an authentication test. The next submitted message makes one
-model request. Non-success status, malformed JSON or timeout is reported, not silently
-retried or replaced with fake model output. A timed-out request may still be billed.
+Configuration is not an authentication test. A non-success status, malformed JSON,
+or timeout is reported and is not replaced with fake model output. A timed-out
+request may still be billed.
 Live provider calls were not tested with a paid account for this release; tests use a
 local simulated compatible server.
 

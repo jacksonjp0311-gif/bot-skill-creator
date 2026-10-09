@@ -187,6 +187,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = ws.validate(data.get('id'))
             elif path == '/api/install':
                 result = ws.install(data.get('id'), data.get('fingerprint'), data.get('approved'))
+            elif path == '/api/open-skill':
+                result = ws.open_installed(data.get('id'))
             elif path == '/api/provider':
                 result = ws.configure_provider(data)
             elif path == '/api/provider/key':

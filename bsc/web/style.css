@@ -298,3 +298,36 @@ html[data-theme="dark"] .nexus-limit{fill:#b7adc8}
 @media(prefers-reduced-motion:reduce){.scan-ring,.scan-sweep,.scan-orbit,.scan-track i,.nexus-edge,#harness-results{animation:none}.scan-track i{left:0;width:100%}}
 
 #bound-target{margin:0;padding:8px 22px;overflow-wrap:anywhere;font-size:12px;flex:none}#harness-workspace{max-width:100%;margin:8px 0;padding:6px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px}.toolbar{height:auto;min-height:52px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}.toolbar-actions{flex-wrap:wrap}#harness-context{width:100%;min-height:150px}#install-summary{overflow-wrap:anywhere}
+#clarify-dialog{width:min(540px,calc(100vw - 28px));padding:26px 24px 20px;border:0;color:#1a1428;background:radial-gradient(circle at 0 0,#efe4ff 0,transparent 46%),radial-gradient(circle at 100% 0,#ffd6ee 0,transparent 38%),#fffafd;box-shadow:0 0 0 2px #6d28d9,0 28px 80px #3f2a8666}
+#clarify-dialog::backdrop{background:#160c2eb8;backdrop-filter:blur(8px)}
+#clarify-dialog .eyebrow{display:inline-block;margin:0;padding:5px 10px;border-radius:999px;background:#3f2a86;color:#fff;letter-spacing:1.3px}
+#clarify-dialog h2{margin:12px 0 6px;color:#2a1860;font-size:32px;font-weight:720;letter-spacing:-.8px}
+#clarify-dialog #clarify-copy{margin:0 0 6px;color:#3b3158;font-size:15px;line-height:1.45}
+#clarify-dialog .clarify-question{margin:0 0 8px;min-width:0}
+#clarify-dialog .clarify-ask{margin:14px 0 12px;color:#1a1428;font-size:20px;font-weight:730;line-height:1.3;letter-spacing:-.3px}
+#clarify-dialog .clarify-choice{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 8px;padding:13px 14px;border:1.5px solid #d9c8ff;border-radius:14px;background:#fff;color:#1a1428;cursor:pointer;box-shadow:0 1px 0 #fff inset}
+#clarify-dialog .clarify-choice:hover{border-color:#6d28d9;background:#f7f2ff}
+#clarify-dialog .clarify-choice:has(input:checked){border-color:#5b21b6;background:linear-gradient(180deg,#f3e8ff,#fff);box-shadow:0 0 0 4px #7c3aed33}
+#clarify-dialog input[type=radio]{appearance:auto;width:18px;height:18px;min-width:18px;margin:0;padding:0;border:0;border-radius:50%;background:transparent;accent-color:#6d28d9;flex:none}
+#clarify-dialog .clarify-choice-copy{flex:1;min-width:0;color:#1a1428;font-size:15px;font-weight:680;line-height:1.35}
+#clarify-dialog .clarify-rec{flex:none;padding:3px 8px;border-radius:999px;background:#6d28d9;color:#fff;font-size:11px;font-weight:750;letter-spacing:.3px}
+#clarify-dialog .clarify-free{width:100%;margin-top:4px;padding:12px 14px;border:1.5px solid #c4b5fd;border-radius:14px;background:#fff;color:#1a1428;font-size:15px}
+#clarify-dialog .clarify-free::placeholder{color:#6b6280}
+#clarify-dialog .dialog-actions{margin-top:16px}
+#clarify-dialog .primary{background:#3f2a86;border-color:#2a1860;color:#fff;border-radius:999px;padding:12px 18px;font-size:14px;font-weight:730;box-shadow:0 8px 18px #3f2a8644}
+html[data-theme="dark"] #clarify-dialog{color:#f7f2ff;background:radial-gradient(circle at 0 0,#4c1d95 0,transparent 48%),radial-gradient(circle at 100% 0,#9d174d 0,transparent 40%),#140f1e;box-shadow:0 0 0 2px #d7cbff,0 28px 80px #000c}
+html[data-theme="dark"] #clarify-dialog::backdrop{background:#07040fb8}
+html[data-theme="dark"] #clarify-dialog .eyebrow{background:#d7cbff;color:#2a1860}
+html[data-theme="dark"] #clarify-dialog h2,html[data-theme="dark"] #clarify-dialog .clarify-ask,html[data-theme="dark"] #clarify-dialog .clarify-choice-copy{color:#f7f2ff}
+html[data-theme="dark"] #clarify-dialog #clarify-copy{color:#ddd0f2}
+html[data-theme="dark"] #clarify-dialog .clarify-choice{background:#241833;border-color:#7c6aad;color:#f7f2ff}
+html[data-theme="dark"] #clarify-dialog .clarify-choice:hover{background:#2e2144;border-color:#d7cbff}
+html[data-theme="dark"] #clarify-dialog .clarify-choice:has(input:checked){background:#3b2760;border-color:#d7cbff;box-shadow:0 0 0 4px #d7cbff44}
+html[data-theme="dark"] #clarify-dialog input[type=radio]{accent-color:#d7cbff}
+html[data-theme="dark"] #clarify-dialog .clarify-rec{background:#d7cbff;color:#2a1860}
+html[data-theme="dark"] #clarify-dialog .clarify-free{background:#120e1a;border-color:#8b7ab8;color:#f7f2ff}
+html[data-theme="dark"] #clarify-dialog .clarify-free::placeholder{color:#cbbbe0}
+html[data-theme="dark"] #clarify-dialog .primary{background:#d7cbff;border-color:#d7cbff;color:#2a1860}
+.message p{white-space:pre-wrap}
+a.skill-link{color:#2a1860;font-weight:650;text-decoration:underline;text-underline-offset:2px}
+html[data-theme="dark"] a.skill-link{color:#d7cbff}

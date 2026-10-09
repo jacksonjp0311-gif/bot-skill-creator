@@ -104,7 +104,7 @@ The response includes a stable harness `id`. Supported operations:
 | `context` | `harness_id`, `context` | Saved creator context; no native memory write |
 | `projects` | none | Drafts in the active workspace |
 | `create` | none | New draft bound to the active harness |
-| `chat` | `id`, `message` | Tailored draft, declared calls and static report; no installation |
+| `chat` | `id`, `message` | Tailored draft. Asks when a choice is unresolved. Installs when the harness check passes, and never overwrites |
 | `validate` | `id` | Fresh catalog check and revision |
 | `install` | `id`, `fingerprint`, `approved:true` | Revision-bound receipt, without execution |
 
@@ -121,7 +121,12 @@ Plans can include `capability_calls`, for example:
 
 Each entry uses exact catalog names and maps parameter names to sources of values. These are
 instruction declarations, not runtime argument values. Static validation checks the advertised
-action and documented parameters, and flags explicit unsupported calls in prose. Natural-language
+action and documented parameters. Prose counts as a call only when it names a catalog tool, skill,
+action, or a path-shaped identifier, and that call is flagged when it is unsupported. The words
+"write a bot skill" do not by themselves require a create, send, or delete command. A follow-up
+answer keeps the original job. When the job does not choose an action, or the draft needs one
+decision, the studio asks in a box and continues after the answer. An answered question is not asked again. When the answer says to ask during the job, the skill collects that fact and finishes. A package that fits is installed
+under `skills/custom`, and the reply says what the skill will do and links to that folder. Natural-language
 intent, runtime types, authentication and execution outcomes still require harness-side review
 and enforcement. Skill commands extracted from examples can have incomplete contracts.
 

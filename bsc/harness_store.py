@@ -57,9 +57,13 @@ class HarnessStore:
         if catalog is None:
             raise InputError('The bound harness is unavailable. No other harness was substituted.')
         # Generated skills do not recursively become evidence for future generated skills.
-        catalog['skills'] = [x for x in catalog.get('skills', []) if not x.startswith('custom/')]
+        catalog['skills'] = [x for x in catalog.get('skills', []) if isinstance(x, str) and not x.startswith('custom/')]
         for key in ('skill_contracts', 'skill_briefs'):
-            catalog[key] = [x for x in catalog.get(key, []) if not x['name'].startswith('custom/')]
+            catalog[key] = [x for x in catalog.get(key, []) if isinstance(x, dict) and not str(x.get('name', '')).startswith('custom/')]
+        tool_names = [item if isinstance(item, str) else item.get('name', '') for item in catalog.get('tools') or []]
+        memories = [item for item in catalog.get('memory_files') or [] if isinstance(item, str)]
+        catalog['nexus'] = harness._nexus_understanding(
+            path, catalog['skills'], [name for name in tool_names if isinstance(name, str) and name], memories)
         record['snapshot'] = {'id': core.fingerprint(catalog), 'inspected_at': time.time(),
                               'source': 'read-only local files', 'live_verified': False, 'catalog': catalog}
         self.save(record)

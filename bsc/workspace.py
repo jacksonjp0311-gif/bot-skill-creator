@@ -19,24 +19,120 @@ from .security import InputError, no_secrets, text
 _ACTIVE = object()
 
 
-def _with_outcome(reply: str, sandbox: dict, install: dict) -> str:
-    notes = []
-    if sandbox.get('ok'):
-        notes.append('Sandbox passed. The package was checked in a temporary folder. The skill was not run.')
+_LEAD = {
+    'find': 'finds', 'search': 'searches', 'share': 'shares', 'list': 'lists',
+    'show': 'shows', 'read': 'reads', 'send': 'sends', 'save': 'saves',
+    'get': 'gets', 'open': 'opens', 'summarize': 'summarizes', 'report': 'reports',
+    'ask': 'asks', 'keep': 'keeps', 'write': 'writes', 'answer': 'answers',
+    'create': 'creates', 'make': 'makes', 'add': 'adds', 'update': 'updates',
+    'edit': 'edits', 'delete': 'deletes', 'append': 'appends', 'draft': 'drafts',
+    'check': 'checks', 'turn': 'turns', 'build': 'builds',
+}
+
+
+def _plain_limit(item: str) -> str:
+    """Turn one constraint into a short spoken limit."""
+    parts = [part.strip().rstrip('.') for part in re.split(r';\s*', item.strip()) if part.strip()]
+    spoken = []
+    for part in parts:
+        if re.match(r'(?i)^use\b', part):
+            part = re.sub(r'(?i)^use\s+', 'It only uses ', part)
+            part = re.sub(r'(?i)\s+only$', '', part).strip()
+        elif re.match(r'(?i)^do not\b', part):
+            part = re.sub(r'(?i)^do not\b', 'It does not', part)
+        elif re.match(r'(?i)^read-only\b', part):
+            part = part.split(':', 1)[-1].strip()
+            part = re.sub(r'(?i)^do not\b', 'It does not', part)
+        else:
+            words = part.split()
+            spoken_lead = _LEAD.get(words[0].lower()) if words else None
+            if spoken_lead:
+                rest = ' '.join(words[1:]).strip()
+                part = 'It ' + spoken_lead + (' ' + rest if rest else '')
+        if part:
+            spoken.append(part[0].upper() + part[1:] + '.')
+    return ' '.join(spoken)
+
+
+def _ask_line(plan: dict) -> str:
+    """The sentence for a fact the skill collects while it runs."""
+    description = str(plan.get('description') or '').replace('\u2019', "'")
+    match = re.search(
+        r'(?i)\bask(?:s)?\s+for\s+([^.]{1,80}?)\s+if\s+(?:it|that|one|they)\s+is missing\b',
+        description)
+    if match and match.group(1).strip(' .'):
+        return 'It asks for ' + match.group(1).strip(' .') + ' when that is missing.'
+    for step in plan.get('steps') or []:
+        if not isinstance(step, str) or not re.search(r'(?i)\b(ask|clarify)\b', step):
+            continue
+        found = re.search(r'(?i)\bif\s+(?:the\s+)?([^.]{1,60}?)\s+is missing\b', step)
+        if found and found.group(1).strip(' .'):
+            return 'It asks for the ' + found.group(1).strip(' .') + ' when it is missing.'
+    return ''
+
+
+def _skill_summary(plan: dict | None) -> str:
+    """One or two plain sentences about what the finished skill will do."""
+    plan = plan or {}
+    goal = str(plan.get('goal') or plan.get('description') or '').strip().rstrip('.')
+    goal = goal.replace('\u2019', "'")
+    if not goal:
+        sentence = 'This skill is ready for the job you described.'
     else:
-        detail = '; '.join(sandbox.get('errors') or ['The package check failed.'])
-        notes.append('Sandbox stopped the install. ' + detail[:400])
-    if install.get('installed'):
-        notes.append('Installed into the harness at ' + install['folder'] + '.')
-    elif install.get('reason'):
-        notes.append(install['reason'])
-    note = ' '.join(notes)
-    body = reply.strip()
-    room = 1500 - len(note) - 1
-    if len(body) > room:
-        body = body[:max(room, 0)].rstrip()
-    combined = (body + '\n' + note).strip() if body else note[:1500]
-    return text(combined, 'Model reply', 1500)
+        goal = re.sub(r"\bthe user's\b", 'your', goal, flags=re.I)
+        goal = re.sub(r'^show the user\b', 'Shows you', goal, flags=re.I)
+        goal = re.sub(r'\bthe user\b', 'you', goal, flags=re.I)
+        goal = re.sub(r'\btheir\b', 'your', goal, flags=re.I)
+        goal = re.sub(r'\byour supplied\b', 'the', goal, flags=re.I)
+        words = goal.split()
+        lead = _LEAD.get(words[0].lower()) if words else None
+        if lead:
+            rest = ' '.join(words[1:])
+            rest = re.sub(
+                r'\band ([A-Za-z]+)\b',
+                lambda match: 'and ' + _LEAD.get(match.group(1).lower(), match.group(1)),
+                rest, count=1)
+            sentence = 'This skill ' + lead + ' ' + rest + '.'
+        elif re.match(r'^(shows|lists|reads|sends|writes|saves|finds|answers|keeps)\b', goal, flags=re.I):
+            sentence = 'This skill ' + goal[0].lower() + goal[1:] + '.'
+        else:
+            sentence = goal[0].upper() + goal[1:] + '.'
+    ask = _ask_line(plan)
+    if ask and ask.lower() not in sentence.lower():
+        sentence += ' ' + ask
+    for item in plan.get('constraints') or []:
+        if not isinstance(item, str):
+            continue
+        lowered = item.lower()
+        if 'local tool' in lowered or 'python' in lowered or 'operation id' in lowered:
+            continue
+        limit = _plain_limit(item)
+        if limit:
+            sentence += ' ' + limit
+        break
+    return sentence
+
+
+def _with_outcome(reply: str, sandbox: dict, install: dict, plan: dict | None = None) -> str:
+    if sandbox.get('pending_clarification'):
+        body = reply.strip()
+        note = 'Answer in the box and I will keep going.'
+        combined = (body + '\n' + note).strip() if body else note
+        return text(combined, 'Model reply', 1500)
+    if sandbox.get('ok') and (install.get('installed') or install.get('url')):
+        summary = _skill_summary(plan)
+        if install.get('installed'):
+            closing = 'It fits your harness, and it is installed.'
+        else:
+            closing = 'It fits your harness. ' + (install.get('reason') or 'I left the existing copy where it is.')
+        link = install.get('url') or install.get('folder') or ''
+        return text('\n'.join(part for part in (summary, '', closing, link) if part or part == ''), 'Model reply', 1500)
+    if sandbox.get('ok'):
+        summary = _skill_summary(plan)
+        note = install.get('reason') or 'The check passed. Connect a harness and I will put it there.'
+        return text(summary + '\n\n' + note, 'Model reply', 1500)
+    detail = '; '.join(sandbox.get('errors') or ['The package check failed.'])
+    return text('I paused before installing. ' + detail[:400], 'Model reply', 1500)
 
 
 class Workspace:
@@ -133,6 +229,13 @@ class Workspace:
         p['export_fingerprint'] = core.fingerprint({'id': p['id'], 'revision': p['revision'],
             'files': {k: sha256(v).hexdigest() for k, v in files.items()}})
         p['target'] = self.harnesses.get(p['harness_id'])['profile']['path'] if p.get('harness_id') else None
+        install = dict(p.get('install') or {})
+        folder = install.get('folder')
+        if p.get('target') and isinstance(folder, str) and folder:
+            dest = (Path(p['target']) / folder).resolve()
+            install['path'] = str(dest)
+            install['url'] = dest.as_uri()
+            p['install'] = install
         p['install_fingerprint'] = core.fingerprint({'export': p['export_fingerprint'], 'harness_id': p.get('harness_id'), 'snapshot_id': p.get('snapshot_id')})
         p['stages'] = core.STAGES
         return p
@@ -184,43 +287,77 @@ class Workspace:
                     raise InputError('Use the model settings for credentials, never the chat.')
                 ops = [x for x in (p['api'] or {}).get('operations', []) if x['id'] in p['selected_ids']]
                 messages = p['messages'] + [{'role': 'user', 'content': message}]
+                job = core.conversation_job(messages) or message
                 self.set_phase(project_id, 'writing')
-                if self.provider:
+                questions = core.unresolved_questions(job, catalog) if catalog else []
+                plan = p.get('plan')
+                if questions:
+                    reply = 'I need one choice before I can finish this skill.'
+                    source = p.get('draft_source') or ('model:' + self.provider['model'] if self.provider else 'offline_template')
+                elif self.provider:
                     proposal = providers.draft(self.provider, messages=messages, current_plan=p['plan'],
                                                selected_operations=ops, harness=catalog)
                     plan = core.validate_plan(proposal)
-                    reply = text(proposal.get('reply', 'Draft updated. Review the contract before export.'), 'Model reply', 1200)
+                    reply = text(proposal.get('reply', 'Your skill is coming together.'), 'Model reply', 1200)
                     no_secrets(reply)
                     source = 'model:' + self.provider['model']
-                    gaps = (core.interlink_gaps(plan, message, catalog) + core.contracts.errors(plan, catalog)) if catalog else []
-                    if gaps:
-                        self.set_phase(project_id, 'linking')
+                    questions = core.fresh_questions(core.studio_questions(proposal.get('questions')), messages)
+                    if core.studio_questions(proposal.get('questions')) and not questions:
                         try:
                             revised = providers.draft(
                                 self.provider, messages=messages, current_plan=plan,
-                                selected_operations=ops, harness=catalog, missing_links=gaps)
+                                selected_operations=ops, harness=catalog,
+                                missing_links=[core.closed_question_note(messages)])
                             plan = core.validate_plan(revised)
                             reply = text(revised.get('reply', reply), 'Model reply', 1200)
                             no_secrets(reply)
+                            questions = core.fresh_questions(core.studio_questions(revised.get('questions')), messages)
                         except InputError:
-                            pass
+                            questions = []
+                    if not questions:
+                        gaps = (core.interlink_gaps(plan, job, catalog) + core.contracts.errors(plan, catalog)) if catalog else []
+                        if gaps:
+                            self.set_phase(project_id, 'linking')
+                            try:
+                                revised = providers.draft(
+                                    self.provider, messages=messages, current_plan=plan,
+                                    selected_operations=ops, harness=catalog, missing_links=gaps)
+                                plan = core.validate_plan(revised)
+                                reply = text(revised.get('reply', reply), 'Model reply', 1200)
+                                no_secrets(reply)
+                                questions = core.fresh_questions(
+                                    core.studio_questions(revised.get('questions')), messages)
+                            except InputError:
+                                pass
                 else:
-                    plan = core.offline_plan(message, ops, p['plan'], catalog)
+                    plan = core.offline_plan(job, ops, p['plan'], catalog)
                     reply = ('Added your refinement as an explicit constraint. Template mode does not infer a rewritten plan; '
                              'edit the blueprint or connect a model for semantic revisions.' if p['plan'] else
                              'Your brief is now a portable draft with required inputs, a bounded workflow, and evidence checks. '
                              'Review the blueprint, select any API operations, then export. This is deterministic template mode, not an AI model.')
                     source = 'offline_template'
-                plan = core.validate_plan(core.bind_harness(plan, message, catalog))
-                self.set_phase(project_id, 'testing')
-                try:
-                    sandbox = core.sandbox_package(plan, p['api'], p['selected_ids'], catalog, message)
-                except InputError as exc:
-                    sandbox = {'ok': False, 'errors': [str(exc)], 'live_verified': False}
-                install = {'installed': False, 'reason': 'Review this revision and approve installation separately.' if catalog else 'No harness is bound, so the skill stayed in the studio.'}
-                if record:
-                    self.harnesses.remember(record['id'], p['snapshot_id'], project_id, p['revision'] + 1, sandbox)
-                reply = _with_outcome(reply, sandbox, install)
+                if questions:
+                    p['clarification'] = {'pending': True, 'questions': questions}
+                    sandbox = {'ok': False, 'errors': [], 'pending_clarification': True, 'live_verified': False}
+                    install = {'installed': False, 'reason': 'Answer the question and I will keep going.'}
+                else:
+                    p['clarification'] = {'pending': False, 'questions': []}
+                    plan = core.validate_plan(core.bind_harness(plan, job, catalog))
+                    self.set_phase(project_id, 'testing')
+                    try:
+                        sandbox = core.sandbox_package(plan, p['api'], p['selected_ids'], catalog, job)
+                    except InputError as exc:
+                        sandbox = {'ok': False, 'errors': [str(exc)], 'live_verified': False}
+                    if sandbox.get('ok') and record:
+                        self.set_phase(project_id, 'installing')
+                        install = self._install_into_harness(record['profile'], plan, p['api'], p['selected_ids'])
+                        install.update({'harness_id': p['harness_id'], 'snapshot_id': p['snapshot_id'],
+                                        'revision': p['revision'] + 1})
+                    else:
+                        install = {'installed': False, 'reason': '' if catalog else 'No harness is bound, so the skill stayed in the studio.'}
+                    if record:
+                        self.harnesses.remember(record['id'], p['snapshot_id'], project_id, p['revision'] + 1, sandbox)
+                reply = _with_outcome(reply, sandbox, install, plan if isinstance(plan, dict) else None)
                 p.update({'messages': messages + [{'role': 'assistant', 'content': reply}], 'plan': plan,
                           'draft_source': source, 'sandbox': sandbox, 'install': install})
                 return self._update(p)
@@ -249,13 +386,16 @@ class Workspace:
             inside = ''
         if inside != os.path.normcase(str(skills_root)):
             return {'installed': False, 'reason': 'The install path left the harness skills folder.'}
+        folder = 'skills/custom/' + slug
         if destination.exists() or destination.is_symlink():
-            return {'installed': False, 'reason': 'That skill is already in the harness. It was not overwritten.'}
+            return {'installed': False, 'already': True, 'folder': folder, 'path': str(destination),
+                    'url': destination.as_uri(),
+                    'reason': 'That skill is already in the harness. It was not overwritten.'}
         try:
             core.write_package(skills_root / 'custom', plan, api, selected_ids)
         except (InputError, OSError):
             return {'installed': False, 'reason': 'The skill was not installed. The harness copy was left unchanged.'}
-        return {'installed': True, 'folder': 'skills/custom/' + slug}
+        return {'installed': True, 'folder': folder, 'path': str(destination), 'url': destination.as_uri()}
 
     def install(self, project_id, expected_fingerprint, approved):
         with self.lock:
@@ -277,6 +417,31 @@ class Workspace:
             p['install'] = receipt
             self.save(p)
             return self.view(p)
+
+    def open_installed(self, project_id):
+        """Open the installed skill folder. The path has to be that project's harness copy."""
+        with self.lock:
+            p = self.get(project_id)
+            shown = self.view(p)
+            install = shown.get('install') or {}
+            raw = install.get('path')
+            if not isinstance(raw, str) or not raw:
+                raise InputError('Install the skill before opening its folder.')
+            dest = Path(raw).resolve()
+            record = self.harnesses.refresh(p['harness_id']) if p.get('harness_id') else None
+            if not record:
+                raise InputError('No harness is bound to this skill.')
+            root = harness._verified_root(record['profile'].get('path'))
+            skills = (root / 'skills' / 'custom').resolve()
+            if dest.parent != skills or not dest.is_dir() or dest.is_symlink():
+                raise InputError('That folder is outside the installed skills directory.')
+            if os.name != 'nt':
+                raise InputError('Opening the folder is available on Windows.')
+            try:
+                os.startfile(dest)  # noqa: S606 - the path was checked against this project's harness
+            except OSError:
+                raise InputError('The skill folder could not be opened.')
+            return {'opened': True, 'url': dest.as_uri()}
 
     def validate(self, project_id):
         with self.lock:

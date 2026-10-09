@@ -1,7 +1,7 @@
 'use strict';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const state = {token:'', project:null, projects:[], provider:{connected:false}, file:'SKILL.md', busy:false, reviewed:null, providerPick:null, localModels:[], holdLocal:false, savedKeys:[], localSaved:null, pending:'', phaseLabel:'', revealReply:false, harness:{accepted:false}, harnessHomes:[], harnessPick:'', harnessAgreed:'', harnessPrompted:false, untilClose:false, clientId:'', holdingStudio:false};
+const state = {token:'', project:null, projects:[], provider:{connected:false}, file:'SKILL.md', busy:false, reviewed:null, providerPick:null, localModels:[], holdLocal:false, savedKeys:[], localSaved:null, pending:'', phaseLabel:'', revealReply:false, clarifyDismissed:false, harness:{accepted:false}, harnessHomes:[], harnessPick:'', harnessAgreed:'', harnessPrompted:false, untilClose:false, clientId:'', holdingStudio:false};
 let phaseWatch = 0;
 const PROVIDERS = [
   {id:'openai', name:'ChatGPT', maker:'OpenAI', mark:'GPT', color:'#0f766e', blurb:'Current ChatGPT chat models. The field still accepts an exact model ID.', base:'https://api.openai.com/v1', token:'max_completion_tokens', json:true, local:false, models:[
@@ -80,7 +80,7 @@ async function run(fn) {
   catch(error) {failed=true; toast(error.message); $('#status-text').textContent='Request stopped · Draft retained';}
   finally {
     state.busy=false; document.body.classList.remove('is-busy'); $('#send').disabled=false;
-    if(!failed) renderStatus();
+    if(!failed) { renderStatus(); maybeAsk(state.project); }
     else {$('#export').disabled=!state.project?.validation?.ok; $('#edit-plan').disabled=!state.project?.plan;}
   }
 }
@@ -473,11 +473,37 @@ function stopPhaseWatch() {
   phaseWatch = 0;
   state.phaseLabel = '';
 }
-function messageCard(role, content) {
+function skillLink(project) {
+  const install=project?.install||{};
+  const anchor=node('a','skill-link', install.folder||'Open the skill');
+  anchor.href=install.url;
+  anchor.addEventListener('click',event=>{
+    event.preventDefault();
+    run(async()=>{
+      await api('/api/open-skill',{id:project.id});
+      toast('Opened the skill folder.');
+    });
+  });
+  return anchor;
+}
+function fillMessage(parent, content, project) {
+  const url=project?.install?.url||'';
+  if(!url || !String(content).includes(url)) {
+    parent.append(document.createTextNode(content));
+    return;
+  }
+  String(content).split(url).forEach((part,index,parts)=>{
+    if(part) parent.append(document.createTextNode(part));
+    if(index<parts.length-1) parent.append(skillLink(project));
+  });
+}
+function messageCard(role, content, project) {
   const card=node('article',`message ${role}`);
   card.append(node('div','message-avatar',role==='user'?'YOU':'✳'));
   const body=node('div','message-content');
-  body.append(node('div','message-header',role==='user'?'You':'Bot Skill Creator'), node('p','',content));
+  const paragraph=node('p');
+  fillMessage(paragraph, content, role==='assistant'?project:null);
+  body.append(node('div','message-header',role==='user'?'You':'Bot Skill Creator'), paragraph);
   card.append(body);
   return card;
 }
@@ -485,17 +511,23 @@ function renderMessages() {
   const p=state.project, target=$('#messages');target.replaceChildren();
   const saved=p?.messages||[];
   saved.forEach((msg,index)=>{
-    const card=messageCard(msg.role, msg.content);
+    const card=messageCard(msg.role, msg.content, p);
     if(msg.role!=='user') card.querySelector('.message-header').append(node('span','',p.draft_source==='offline_template'?'TEMPLATE':'MODEL DRAFT'));
     if(state.revealReply&&msg.role==='assistant'&&index===saved.length-1) card.classList.add('just-sent');
     if(msg.role==='assistant'&&index===saved.length-1&&p.plan) {
-      const badge=node('div','message-card');badge.append(node('span','','▧'),node('strong','',p.plan.name),node('span','','Draft ready ↗'));
+      const badge=node('div','message-card');badge.append(node('span','','▧'),node('strong','',p.plan.name),node('span','',p.clarification?.pending?'One question first':'Draft ready ↗'));
       card.querySelector('.message-content').append(badge);
+    }
+    if(msg.role==='assistant'&&index===saved.length-1&&p.clarification?.pending) {
+      const again=node('button','quiet','Answer this');
+      again.type='button';
+      again.addEventListener('click',()=>{state.clarifyDismissed=false; openClarify(p);});
+      card.querySelector('.message-content').append(again);
     }
     target.append(card);
   });
   if(state.pending) {
-    const yours=messageCard('user', state.pending);
+    const yours=messageCard('user', state.pending, p);
     yours.classList.add('just-sent');
     const working=node('article','message assistant working just-sent');
     working.setAttribute('role','status');
@@ -537,7 +569,7 @@ function renderProject(project) {
   $('#project-title').textContent=project.plan?.name||'Untitled skill';
   $('#skill-name').textContent=project.plan?.name||'Your next capability';
   $('#skill-desc').textContent=project.plan?.description||'A clear contract. A portable folder.';
-  $('#draft-status').textContent=project.plan?'READY TO REVIEW':'DRAFT';
+  $('#draft-status').textContent=project.install?.installed?'INSTALLED':project.clarification?.pending?'ONE QUESTION':project.plan?'READY':'DRAFT';
   renderChecks(project.plan);
   $('#api-counter').textContent=project.api?'1':'0';
   const attached=$('#attached-bar');attached.hidden=!project.api;
@@ -546,6 +578,7 @@ function renderProject(project) {
   renderFile();renderMessages();renderAPI();renderStatus();
 }
 function proofLine(project) {
+  if (project?.clarification?.pending) return 'One question first · Then I keep going';
   if (!project?.validation) return 'No draft yet · Nothing has been executed';
   const mark = project.validation.ok ? '✓' : '!';
   const files = `${project.validation.file_count} files`;
@@ -689,13 +722,8 @@ async function calculate() {
     $('#math-result').textContent=`q = ${result.q.toFixed(4)}   μ = ${result.mu.toFixed(4)}\nθ = ${result.theta.toFixed(4)}   score = ${result.score.toFixed(4)}\nIllustrative cost 0.20 · λ 0.15 · Not calibrated`;
   } catch(error) {toast(error.message);}
 }
-$('#chat-form').addEventListener('submit',event=>{
-  event.preventDefault();
-  if(state.busy) return;
-  const message=$('#message-input').value.trim();
-  if(!message) return;
-  $('#message-input').value='';
-  fitComposer();
+function submitChat(message) {
+  if(state.busy || !message || !state.project) return;
   state.pending=message;
   state.phaseLabel=state.harness&&state.harness.accepted?'Analyzing harness':'Working on your skill…';
   renderMessages();
@@ -706,6 +734,7 @@ $('#chat-form').addEventListener('submit',event=>{
       const project=await api('/api/chat',{id:state.project.id,message});
       stopPhaseWatch();
       state.pending='';
+      state.clarifyDismissed=false;
       state.revealReply=true;
       renderProject(project);
       state.revealReply=false;
@@ -719,7 +748,75 @@ $('#chat-form').addEventListener('submit',event=>{
       throw error;
     }
   });
+}
+function openClarify(project) {
+  const ask=project?.clarification;
+  const dialog=$('#clarify-dialog');
+  if(!ask?.pending || !ask.questions?.length || !dialog) return;
+  const fields=$('#clarify-fields');
+  fields.replaceChildren();
+  ask.questions.forEach((item,index)=>{
+    const block=node('div','clarify-question');
+    block.append(node('p','clarify-ask',item.question));
+    (item.choices||[]).forEach((choice,choiceIndex)=>{
+      const label=node('label','clarify-choice');
+      const input=node('input');
+      input.type='radio';
+      input.name='clarify-'+index;
+      input.value=choice;
+      if(choiceIndex===0) input.checked=true;
+      const copy=node('span','clarify-choice-copy',choice);
+      label.append(input, copy);
+      if(choiceIndex===0) label.append(node('span','clarify-rec','Recommended'));
+      block.append(label);
+    });
+    const free=node('input');
+    free.type='text';
+    free.className='clarify-free';
+    free.placeholder=item.choices?.length?'Or tell me in your own words':'Type your answer';
+    free.maxLength=500;
+    free.setAttribute('aria-label', item.question);
+    block.append(free);
+    fields.append(block);
+  });
+  if(!dialog.open) dialog.showModal();
+  const focus=fields.querySelector('input');
+  if(focus) focus.focus();
+}
+function maybeAsk(project) {
+  if(!project?.clarification?.pending || state.clarifyDismissed || state.busy) return;
+  openClarify(project);
+}
+function clarifyMessage() {
+  const lines=[];
+  for(const block of $$('#clarify-fields .clarify-question')) {
+    const question=block.querySelector('.clarify-ask').textContent;
+    const typed=block.querySelector('.clarify-free').value.trim();
+    const picked=block.querySelector('input[type=radio]:checked');
+    const answer=typed || (picked?picked.value:'');
+    if(!answer) return '';
+    lines.push(question+' — '+answer);
+  }
+  return lines.length ? ['Here you go:'].concat(lines).join(String.fromCharCode(10)) : '';
+}
+$('#chat-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  if(state.busy) return;
+  const message=$('#message-input').value.trim();
+  if(!message) return;
+  $('#message-input').value='';
+  fitComposer();
+  submitChat(message);
 });
+$('#clarify-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  const message=clarifyMessage();
+  if(!message) { toast('I need an answer before I can keep going.'); return; }
+  state.clarifyDismissed=true;
+  $('#clarify-dialog').close();
+  submitChat(message);
+});
+$('#clarify-close').addEventListener('click',()=>{state.clarifyDismissed=true;});
 $('#message-input').addEventListener('input',fitComposer);
 $('#message-input').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();$('#chat-form').requestSubmit();}});
 $$('.starter').forEach(button=>button.addEventListener('click',()=>{$('#message-input').value=button.dataset.prompt;fitComposer();$('#message-input').focus();}));

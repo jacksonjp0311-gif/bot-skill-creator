@@ -29,6 +29,30 @@ def lines(value, label, limit=12, maximum=1000):
     return [text(x, label, maximum) for x in value]
 
 
+def studio_questions(value) -> list[dict]:
+    """Questions the studio asks in a box before the draft continues. A bad shape asks nothing."""
+    if not value:
+        return []
+    if not isinstance(value, list) or len(value) > 3:
+        return []
+    result = []
+    try:
+        for item in value:
+            if isinstance(item, str):
+                item = {'question': item}
+            if not isinstance(item, dict) or not str(item.get('question') or '').strip():
+                return []
+            raw_choices = item.get('choices') or []
+            if not isinstance(raw_choices, list) or len(raw_choices) > 6:
+                return []
+            choices = [text(choice, 'Choice', 120) for choice in raw_choices if isinstance(choice, str) and choice.strip()]
+            result.append({'question': text(item.get('question'), 'Question', 300), 'choices': choices})
+        no_secrets(result)
+    except InputError:
+        return []
+    return result
+
+
 def validate_plan(plan: dict) -> dict:
     if not isinstance(plan, dict):
         raise InputError('The plan must be a JSON object.')
@@ -70,8 +94,121 @@ def harness_words(message: str) -> set[str]:
 
 def positive_request(message: str) -> str:
     # Template routing must not recruit a capability from an explicitly forbidden clause.
+    normalized = message.replace('\u2019', "'").replace('\u2018', "'")
     return '. '.join(re.split(r"\b(?:do not|does not|don't|never|without|unless)\b", clause, flags=re.I)[0]
-                     for clause in re.split(r'[.!?;]', message))
+                     for clause in re.split(r'[.!?;]', normalized))
+
+
+_SKILL_REQUEST = re.compile(
+    r'(?is)^\s*(?:please\s+)?write\s+(?:a|the)\s+bot\s+skill\b(?:\s+(?:for|to|that|which)\b)?'
+)
+_ANSWER_MARKS = (' — ', ' – ', ' - ')
+
+
+def job_request(message: str) -> str:
+    """The job itself. A leading "write a bot skill" is the request, not a create or send."""
+    return _SKILL_REQUEST.sub('', positive_request(message), count=1).strip()
+
+
+def clarification_answers(message: str) -> str | None:
+    """The choice after a studio question. The question text is not a new job."""
+    body = message.strip()
+    if not body.lower().startswith('here you go:'):
+        return None
+    answers = []
+    for line in body.splitlines():
+        for mark in _ANSWER_MARKS:
+            if mark in line:
+                answer = line.split(mark, 1)[1].strip()
+                if answer:
+                    answers.append(answer)
+                break
+    return ' '.join(answers)
+
+
+_QUESTION_STOP = {
+    'what', 'which', 'should', 'the', 'a', 'an', 'this', 'that', 'my', 'for', 'to',
+    'use', 'do', 'you', 'your', 'be', 'of', 'in', 'on', 'it', 'is', 'if', 'one',
+    'new', 'when', 'how', 'does', 'can', 'we',
+}
+
+
+def _question_words(value: str) -> set[str]:
+    return {word for word in re.findall(r'[a-z0-9]+', value.lower())
+            if len(word) > 2 and word not in _QUESTION_STOP}
+
+
+def answered_pairs(messages) -> list[tuple[str, str]]:
+    """Question and answer pairs already given in this conversation."""
+    pairs = []
+    for item in messages or []:
+        if not isinstance(item, dict) or item.get('role') != 'user':
+            continue
+        content = item.get('content')
+        if not isinstance(content, str) or not content.lower().lstrip().startswith('here you go:'):
+            continue
+        for line in content.splitlines():
+            for mark in _ANSWER_MARKS:
+                if mark not in line:
+                    continue
+                question, answer = line.split(mark, 1)
+                question = re.sub(r'(?i)^here you go:\s*', '', question).strip()
+                answer = answer.strip()
+                if question and answer:
+                    pairs.append((question, answer))
+                break
+    return pairs
+
+
+def question_is_closed(question: str, messages) -> bool:
+    """True when this question, or the same decision in other words, was already answered."""
+    words = _question_words(question)
+    if not words:
+        return False
+    for previous, _answer in answered_pairs(messages):
+        before = _question_words(previous)
+        if not before:
+            continue
+        if words == before or words <= before or before <= words:
+            return True
+        shared = words & before
+        if shared and len(shared) / len(words | before) >= 0.5:
+            return True
+    return False
+
+
+def fresh_questions(questions: list[dict], messages) -> list[dict]:
+    """Drop a question the user already answered. A new decision still gets asked."""
+    if not answered_pairs(messages):
+        return questions
+    return [item for item in questions if not question_is_closed(str(item.get('question') or ''), messages)]
+
+
+def closed_question_note(messages) -> str:
+    """Tell the drafter to finish from the answers it already has."""
+    rendered = '; '.join(f'{question} — {answer}' for question, answer in answered_pairs(messages)[-3:])
+    note = (
+        'These questions are already answered: ' + rendered
+        + '. Do not ask them again. If an answer says to ask the user during the job,'
+        + ' call clarify with that one question and continue.'
+    )
+    return note[:800]
+
+
+def conversation_job(messages) -> str:
+    """The whole job, including answers. A follow-up does not throw away the original request."""
+    if isinstance(messages, str):
+        return messages
+    parts = []
+    for item in messages or []:
+        if not isinstance(item, dict) or item.get('role') != 'user':
+            continue
+        content = item.get('content')
+        if not isinstance(content, str) or not content.strip():
+            continue
+        answers = clarification_answers(content)
+        parts.append(content.strip() if answers is None else answers)
+    return '\n'.join(parts).strip()
 
 
 def _tokens(name: str) -> set[str]:
@@ -180,6 +317,7 @@ VERB_ACTIONS = {
     'triage': {'triage', 'classify'},
 }
 APPROVAL_WORDS = {'send', 'reply', 'delete', 'modify', 'remove'}
+READ_FIRST = {'list', 'get', 'search', 'read', 'show', 'fetch', 'labels'}
 
 
 def _stem(words: set[str]) -> set[str]:
@@ -190,6 +328,17 @@ def _stem(words: set[str]) -> set[str]:
     return words | extra
 
 
+def _distinct_hits(hits: set[str]) -> int:
+    """Count a word and the stem sitting beside it as one hit."""
+    roots = set()
+    for word in hits:
+        if len(word) > 4 and word.endswith('s') and not word.endswith('ss'):
+            roots.add(word[:-1])
+        else:
+            roots.add(word)
+    return len(roots)
+
+
 def _surface_words(message: str) -> set[str]:
     """Words the user actually wrote. Verb targets such as send are not included."""
     raw = set(re.findall(r'[a-z0-9]+', positive_request(message).lower()))
@@ -198,7 +347,7 @@ def _surface_words(message: str) -> set[str]:
 
 def _job_words(message: str) -> set[str]:
     """Surface words plus the actions those verbs stand for. write reaches send and draft."""
-    raw = set(re.findall(r'[a-z0-9]+', positive_request(message).lower()))
+    raw = set(re.findall(r'[a-z0-9]+', job_request(message).lower()))
     extra = set()
     for word in raw:
         extra |= VERB_ACTIONS.get(word, set())
@@ -245,9 +394,14 @@ def _matching_commands(contract: dict, words: set[str], surface: set[str], skill
             rest = _tokens(action['name']) - {key} - HARNESS_STOP
             if rest & words:
                 hits.append(action)
-        selected.extend(hits or items)
+        if hits:
+            selected.extend(hits)
+        elif len(items) == 1:
+            selected.append(items[0])
     if selected:
         return selected[:8]
+    if any(key and key in surface for key in groups):
+        return []
     hits = [action for action in actions if (_tokens(action['name']) & surface)]
     return hits[:8]
 
@@ -269,7 +423,7 @@ def linked_skills(message: str, harness: dict | None) -> list[dict]:
         product = 1 if any(
             action['name'].split()[0] in surface for action in _command_actions(contract)
         ) else 0
-        matched = bool(name_hit or product or len(summary_hits) >= 2)
+        matched = bool(name_hit or product or _distinct_hits(summary_hits) >= 2)
         commands = _matching_commands(contract, words, surface, matched)
         score = 5 * len(name_hit) + 5 * len(summary_hits) + product * 5 + min(4, len(commands))
         if not matched or score <= 0:
@@ -336,6 +490,45 @@ def linked_skills(message: str, harness: dict | None) -> list[dict]:
             'actions': actions,
         })
     return links
+
+
+def unresolved_questions(message: str, harness: dict | None) -> list[dict]:
+    """Ask when a product matches and the job never chooses an action. The read-only choice is first."""
+    if not harness:
+        return []
+    surface = {word for word in _surface_words(message) if len(word) >= 3}
+    words = {word for word in _job_words(message) if len(word) >= 3}
+    questions = []
+    for contract in skill_contracts(harness):
+        if contract['name'].startswith('custom/'):
+            continue
+        leaf_tokens = _stem({word for word in _tokens(_leaf(contract['name'])) if len(word) >= 3})
+        summary_tokens = _stem({word for word in _tokens(contract.get('summary') or '') if len(word) >= 3})
+        name_hit = (leaf_tokens - GENERIC_CAPABILITY - HARNESS_STOP) & surface
+        summary_hits = (summary_tokens - GENERIC_CAPABILITY - HARNESS_STOP) & surface
+        product = any(action['name'].split()[0] in surface for action in _command_actions(contract))
+        if not (name_hit or product or _distinct_hits(summary_hits) >= 2):
+            continue
+        groups: dict[str, list[dict]] = {}
+        for action in _command_actions(contract):
+            parts = action['name'].split()
+            key = parts[0] if len(parts) >= 2 else ''
+            if key:
+                groups.setdefault(key, []).append(action)
+        for key, items in groups.items():
+            if key not in surface or len(items) < 2:
+                continue
+            if any((_tokens(action['name']) - {key} - HARNESS_STOP) & words for action in items):
+                continue
+            ordered = sorted(items, key=lambda action: (
+                0 if (_tokens(action['name']) & READ_FIRST) else 1, action['name']))
+            questions.append({
+                'question': 'Which ' + key.replace('-', ' ') + ' action should this skill use?',
+                'choices': [action['name'] for action in ordered[:6]],
+            })
+            if len(questions) >= 3:
+                return questions
+    return questions
 
 
 def linked_steps(message: str, harness: dict | None) -> list[str]:
@@ -652,7 +845,7 @@ def compile_package(plan: dict, api: dict | None = None, selected_ids: list | No
 
 ## Use it
 Read [SKILL.md](SKILL.md). When a harness is accepted, the studio copies this folder into
-that harness only after validation and explicit review approval. Existing skills are never overwritten.
+that harness when the package check passes. An existing skill is never overwritten.
 Review [the host contract](references/HARNESS.md) before connecting tools. The skill is not run.
 
 ## Check it

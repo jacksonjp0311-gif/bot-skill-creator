@@ -42,7 +42,8 @@ class HarnessWorkspaceTests(unittest.TestCase):
     def test_chat_only_drafts_and_install_is_revision_bound(self):
         p = self.draft()
         self.assertTrue(p['sandbox']['ok'], p['sandbox'])
-        self.assertFalse((self.a / 'skills/custom').exists())
+        self.assertTrue(p['install']['installed'])
+        self.assertTrue((self.a / 'skills/custom').exists())
         with self.assertRaises(InputError):
             self.ws.install(p['id'], p['install_fingerprint'], False)
         changed = self.ws.edit_plan(p['id'], {**p['plan'], 'description': 'Changed purpose.'})
@@ -51,7 +52,8 @@ class HarnessWorkspaceTests(unittest.TestCase):
             self.ws.install(p['id'], p['install_fingerprint'], True)
         validated = self.ws.validate(p['id'])
         installed = self.ws.install(p['id'], validated['install_fingerprint'], True)
-        self.assertTrue(installed['install']['installed'])
+        self.assertFalse(installed['install']['installed'])
+        self.assertIn('not overwritten', installed['install']['reason'])
         self.assertEqual(installed['install']['harness_id'], self.a_id)
 
     def test_switch_and_restart_preserve_context_and_draft_target(self):
@@ -64,8 +66,9 @@ class HarnessWorkspaceTests(unittest.TestCase):
         continued = self.ws.chat(p['id'], 'Keep the memory note concise.')
         self.assertEqual(continued['harness_id'], self.a_id)
         self.assertIn('memory', json.dumps(continued['plan']))
-        installed = self.ws.install(p['id'], continued['install_fingerprint'], True)
-        self.assertTrue(installed['install']['installed'])
+        self.assertFalse(continued['install']['installed'])
+        self.assertIn('not overwritten', continued['install']['reason'])
+        self.assertTrue((self.a / 'skills/custom').exists())
         self.assertFalse((self.b / 'skills/custom').exists())
         again = Workspace(self.ws.path, Keystore(self.root / 'secrets'))
         self.assertEqual(len(again.harness_list()['harnesses']), 2)
@@ -150,7 +153,7 @@ class HarnessWorkspaceTests(unittest.TestCase):
         self.assertFalse(failures)
         self.assertEqual(results[0]['harness_id'], self.a_id)
         self.assertEqual(self.ws.harness_profile()['id'], b_id)
-        self.assertFalse((self.a / 'skills/custom').exists())
+        self.assertTrue((self.a / 'skills/custom').exists())
         self.assertFalse((self.b / 'skills/custom').exists())
 
     def test_legacy_drafts_remain_unbound(self):
@@ -169,10 +172,14 @@ class HarnessWorkspaceTests(unittest.TestCase):
         p = dispatch({**request, 'operation': 'create'})
         draft = dispatch({**request, 'operation': 'chat', 'id': p['id'], 'message': 'Save a memory note.'})
         self.assertEqual(draft['harness_id'], self.a_id)
-        self.assertFalse(draft['install']['installed'])
+        self.assertTrue(draft['install']['installed'])
+        with self.assertRaises(InputError):
+            dispatch({**request, 'operation': 'install', 'id': p['id'],
+                      'fingerprint': draft['install_fingerprint'], 'approved': False})
         installed = dispatch({**request, 'operation': 'install', 'id': p['id'],
                               'fingerprint': draft['install_fingerprint'], 'approved': True})
-        self.assertTrue(installed['install']['installed'])
+        self.assertFalse(installed['install']['installed'])
+        self.assertIn('not overwritten', installed['install']['reason'])
 
     def test_http_install_requires_token_approval_and_review(self):
         server = AppServer(('127.0.0.1', 0), self.ws)
@@ -190,13 +197,16 @@ class HarnessWorkspaceTests(unittest.TestCase):
             self.assertEqual(request('/api/harnesses')['active_id'], self.a_id)
             p = request('/api/projects', {})
             p = request('/api/chat', {'id': p['id'], 'message': 'Save a memory note.'})
+            self.assertTrue(p['install']['installed'])
+            self.assertTrue((self.a / 'skills/custom').exists())
             body = {'id': p['id'], 'fingerprint': p['install_fingerprint'], 'approved': True}
             with self.assertRaises(urllib.error.HTTPError):
                 request('/api/install', body, token=False)
             with self.assertRaises(urllib.error.HTTPError):
                 request('/api/install', {**body, 'approved': False})
-            self.assertFalse((self.a / 'skills/custom').exists())
-            self.assertTrue(request('/api/install', body)['install']['installed'])
+            again = request('/api/install', body)
+            self.assertFalse(again['install']['installed'])
+            self.assertIn('not overwritten', again['install']['reason'])
         finally:
             server.shutdown()
             server.server_close()
@@ -220,7 +230,7 @@ class ContractTests(unittest.TestCase):
         catalog = {'tools': [{'name': 'memory', 'actions': [{'name': 'add', 'requires': ['content']}]}]}
         plan = core.offline_plan('Save a note.', [])
         plan['steps'] = ['Call memory teleport_money with destination and amount.']
-        self.assertTrue(contracts.errors(plan, catalog))
+        self.assertIn('Unrecognized explicit call: memory teleport_money', ' '.join(contracts.errors(plan, catalog)))
         plan['steps'] = ['Call memory.add with content.']
         plan['capability_calls'] = [{'kind': 'tool', 'name': 'memory', 'action': 'add', 'inputs': {}}]
         self.assertIn('Missing inputs', ' '.join(contracts.errors(plan, catalog)))
@@ -231,6 +241,36 @@ class ContractTests(unittest.TestCase):
         del plan['capability_calls'][0]['inputs']['invented']
         plan['capability_calls'][0]['name'] = 'calendar'
         self.assertIn('Unsupported harness call', ' '.join(contracts.errors(plan, catalog)))
+
+    def test_optional_command_flags_and_headings_are_valid_calls(self):
+        catalog = {'skill_contracts': [
+            {'name': 'productivity/google-workspace', 'actions': [
+                {'name': 'gmail modify', 'kind': 'command', 'requires': ['MESSAGE_ID'],
+                 'note': 'optional --add-labels, --remove-labels'}]},
+            {'name': 'email/email-inbox-triage', 'actions': [
+                {'name': 'Calibrate the user voice', 'kind': 'heading', 'requires': []}]},
+        ]}
+        plan = {'steps': ['Use email/email-inbox-triage. Call gmail modify with MESSAGE_ID.'],
+                'capability_calls': [
+                    {'kind': 'skill', 'name': 'email/email-inbox-triage',
+                     'action': 'Calibrate the user voice', 'inputs': {}},
+                    {'kind': 'skill', 'name': 'productivity/google-workspace', 'action': 'gmail modify',
+                     'inputs': {'MESSAGE_ID': 'From the search result.',
+                                '--add-labels': 'The label the user named.',
+                                '--remove-labels': 'The label the user named.'}},
+                ]}
+        self.assertEqual(contracts.errors(plan, catalog), [])
+        plan['steps'] = ['Call productivity/google-workspace action `gmail modify` with MESSAGE_ID.']
+        self.assertEqual(contracts.errors(plan, catalog), [])
+        plan['steps'] = ['Do not call a separate related skill for Gmail commands.']
+        self.assertEqual(contracts.errors(plan, catalog), [])
+        plan['steps'] = ['Call the inbox, then draft a reply for the business.']
+        self.assertEqual(contracts.errors(plan, catalog), [])
+        plan['steps'] = ['Do not call a related skill when the chosen skill already lists the actions.']
+        self.assertEqual(contracts.errors(plan, catalog), [])
+        plan['capability_calls'] = [plan['capability_calls'][0]]
+        plan['steps'] = ['Call gmail modify with MESSAGE_ID.']
+        self.assertIn('Declare the exact capability call', ' '.join(contracts.errors(plan, catalog)))
 
     def test_uninspected_tool_has_no_invented_action(self):
         with tempfile.TemporaryDirectory() as tmp:

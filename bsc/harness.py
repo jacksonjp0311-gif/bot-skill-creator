@@ -26,7 +26,7 @@ MAX_PURPOSE = 420
 MAX_NOTE = 160
 MAX_INPUT_NOTE = 140
 MAX_TOOL_SOURCE = 800_000
-MAX_SKILL_ACTIONS = 16
+MAX_SKILL_ACTIONS = 32  # A 16-command cap dropped later products such as Sheets.
 SHELL_FENCES = {'', 'bash', 'sh', 'shell', 'console', 'zsh', 'powershell', 'ps1'}
 SKIP_BINS = {
     'brew', 'cargo', 'curl', 'sudo', 'cd', 'echo', 'cat', 'sed', 'npm', 'pip', 'pip3',

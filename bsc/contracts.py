@@ -3,6 +3,16 @@ import re
 from .security import InputError, text
 
 
+def _optional_inputs(action: dict) -> set[str]:
+    note = action.get('note')
+    if not isinstance(note, str):
+        return set()
+    match = re.match(r'(?i)^optional\s+(.+)$', note.strip())
+    if not match:
+        return set()
+    return {part.strip() for part in match.group(1).split(',') if part.strip()}
+
+
 def declarations(value):
     if not isinstance(value, list) or len(value) > 32:
         raise InputError('Capability calls must be a list with at most 32 entries.')
@@ -29,7 +39,7 @@ def surface(catalog):
             for action in entry.get('actions', []):
                 if isinstance(action, str):
                     action = {'name': action}
-                if kind == 'skill' and action.get('kind') != 'command':
+                if kind == 'skill' and action.get('kind') not in {'command', 'heading', None}:
                     continue
                 required = set(action.get('requires', []))
                 required.update(x['name'] for x in entry.get('inputs', [])
@@ -52,8 +62,28 @@ def infer_calls(plan, catalog):
     return calls
 
 
+def _call_names(known):
+    """Catalog names that make the word after call/invoke/execute a real invocation."""
+    exact, actions = set(), set()
+    for _kind, name, action in known:
+        exact.update({name.lower(), action.lower(), f'{name}.{action}'.lower()})
+        actions.add(action.lower())
+    return exact, actions
+
+
+def _names_a_capability(first, second, exact, actions):
+    """Ordinary English is not a call. A path, catalog name, or full action is."""
+    if '/' in first or '.' in first:
+        return True
+    low = first.lower()
+    if low in exact:
+        return True
+    return bool(second) and f'{low} {second.lower()}' in actions
+
+
 def errors(plan, catalog):
     known = surface(catalog)
+    exact, action_names = _call_names(known)
     calls = plan.get('capability_calls', infer_calls(plan, catalog))
     problems = []
     declared = set()
@@ -70,6 +100,9 @@ def errors(plan, catalog):
             entry = next((e for e in entries if isinstance(e, dict) and e['name'] == key[1]), {})
             allowed = set(known[key])
             allowed.update(x['name'] if isinstance(x, dict) else x for x in entry.get('inputs', []))
+            for action in entry.get('actions') or []:
+                if isinstance(action, dict) and action.get('name') == key[2]:
+                    allowed.update(_optional_inputs(action))
             if allowed:
                 unknown = set(call['inputs']) - allowed
                 if unknown:
@@ -80,17 +113,23 @@ def errors(plan, catalog):
             if not any(key[0] == 'tool' and key[1] == tool['name'] for key in declared):
                 problems.append('No declared, inspectable action for tool: ' + tool['name'])
     # Catch explicit calls in prose, including invented actions on a real tool.
+    # "Do not call a separate related skill" is English. "Call memory teleport_money" is not.
     for step in plan.get('steps', []):
         for match in re.finditer(r'\b(?:call|invoke|execute)\s+`?([a-zA-Z_][\w./-]*)(?:\s+([a-zA-Z_][\w-]*))?', step, re.I):
             first, second = match.groups()
             first = first.rstrip('.')
-            if first.lower() in {'needs', 'requires', 'returns', 'is', 'was', 'must', 'should'}:
-                continue  # "a later call needs an ID" is not an invocation.
-            candidates = {key for key in known if first in {key[1], key[2], key[1] + '.' + key[2]}
-                          or (second and key[2] == first + ' ' + second)}
-            if second and second.lower() not in {'with', 'using', 'only', 'from', 'to', 'and', 'after', 'before', 'for', 'if', 'when', 'then'}:
-                narrowed = {key for key in candidates if key[2] in {second, first + ' ' + second}}
-                if narrowed or any(key[1] == first for key in candidates):
+            if re.search(r'\bnot\s+$', step[max(0, match.start() - 12):match.start()].lower()):
+                continue
+            if not _names_a_capability(first, second, exact, action_names):
+                continue
+            first_l = first.lower()
+            second_l = second.lower() if second else ''
+            candidates = {key for key in known
+                          if first_l in {key[1].lower(), key[2].lower(), (key[1] + '.' + key[2]).lower()}
+                          or (second and key[2].lower() == first_l + ' ' + second_l)}
+            if second and second_l not in {'with', 'using', 'only', 'from', 'to', 'and', 'after', 'before', 'for', 'if', 'when', 'then', 'action'}:
+                narrowed = {key for key in candidates if key[2].lower() in {second_l, first_l + ' ' + second_l}}
+                if narrowed or any(key[1].lower() == first_l for key in candidates):
                     candidates = narrowed
             if not candidates:
                 problems.append('Unrecognized explicit call: ' + first + (' ' + second if second else ''))
